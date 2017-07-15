@@ -46,7 +46,7 @@ def load_decks(where='1 = 1', order_by=None, limit=''):
     """.format(person_query=query.person_query(), where=where, order_by=order_by, limit=limit)
     db().execute('SET group_concat_max_len=100000')
     rows = db().execute(sql)
-    cards = oracle.cards_by_name()
+    # cards = oracle.cards_by_name()
     decks = []
     for row in rows:
         d = Deck(row)
@@ -56,7 +56,7 @@ def load_decks(where='1 = 1', order_by=None, limit=''):
         for entry in filter(None, cards_s.split('█')):
             name, n, is_sideboard = entry.split('|')
             location = 'sideboard' if bool(int(is_sideboard)) else 'maindeck'
-            d[location].append({'n': int(n), 'name': name, 'card': cards[name]})
+            d[location].append({'n': int(n), 'name': name, 'card': oracle.get_card(name)})
         d.colored_symbols = json.loads(d.colored_symbols or '[]')
         d.colors = json.loads(d.colors or '[]')
         d.legal_formats = set(json.loads(d.legal_formats or '[]'))
