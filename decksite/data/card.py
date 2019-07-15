@@ -1,97 +1,260 @@
-from magic import oracle, rotation
+import sys
+from typing import Dict, List, Optional
+
+from decksite.data import deck, query
+from decksite.database import db
+from magic import oracle
+from magic.models import Card
+from shared import guarantee
 from shared.container import Container
 from shared.database import sqlescape
+from shared.pd_exception import DatabaseException
 
-from decksite.data import deck, guarantee
-from decksite.database import db
 
-def played_cards(where='1 = 1'):
+def load_cards(season_id: Optional[int] = None, person_id: Optional[int] = None, retry: bool = False) -> List[Card]:
+    if person_id:
+        table = '_card_person_stats'
+        where = 'person_id = {person_id}'.format(person_id=sqlescape(person_id))
+        group_by = 'person_id, name'
+    else:
+        table = '_card_stats'
+        where = 'TRUE'
+        group_by = 'name'
+    sql = """
+        SELECT
+            name,
+            SUM(num_decks) AS num_decks,
+            SUM(wins) AS wins,
+            SUM(losses) AS losses,
+            SUM(draws) AS draws,
+            SUM(wins - losses) AS record,
+            SUM(num_decks_tournament) AS num_decks_tournament,
+            SUM(wins_tournament) AS wins_tournament,
+            SUM(losses_tournament) AS losses_tournament,
+            SUM(draws_tournament) AS draws_tournament,
+            SUM(wins_tournament - losses_tournament) AS record_tournament,
+            SUM(perfect_runs) AS perfect_runs,
+            SUM(tournament_wins) AS tournament_wins,
+            SUM(tournament_top8s) AS tournament_top8s,
+            IFNULL(ROUND((SUM(wins) / NULLIF(SUM(wins + losses), 0)) * 100, 1), '') AS win_percent,
+            IFNULL(ROUND((SUM(wins_tournament) / NULLIF(SUM(wins_tournament + losses_tournament), 0)) * 100, 1), '') AS win_percent_tournament
+        FROM
+            {table} AS cs
+        WHERE
+            ({where}) AND ({season_query})
+        GROUP BY
+            {group_by}
+        ORDER BY
+            num_decks DESC,
+            record,
+            name
+    """.format(table=table, season_query=query.season_query(season_id), where=where, group_by=group_by)
+    try:
+        cs = [Container(r) for r in db().select(sql)]
+        cards = oracle.cards_by_name()
+        for c in cs:
+            c.update(cards[c.name])
+        return cs
+    except DatabaseException as e:
+        if not retry:
+            print(f"Got {e} trying to load_cards so trying to preaggregate. If this is happening on user time that's undesirable.")
+            preaggregate()
+            return load_cards(season_id, person_id, retry=True)
+        print(f'Failed to preaggregate. Giving up.')
+        raise e
+
+def load_card(name: str, season_id: Optional[int] = None) -> Card:
+    c = guarantee.exactly_one(oracle.load_cards([name]))
+    c.decks = deck.load_decks('d.id IN (SELECT deck_id FROM deck_card WHERE card = {name})'.format(name=sqlescape(name)), season_id=season_id)
+    c.wins, c.losses, c.draws, c.tournament_wins, c.tournament_top8s, c.perfect_runs = 0, 0, 0, 0, 0, 0
+    c.wins_tournament, c.losses_tournament, c.draws_tournament = 0, 0, 0
+    c.decks_tournament = []
+    for d in c.decks:
+        c.wins += d.get('wins', 0)
+        c.losses += d.get('losses', 0)
+        c.draws += d.get('draws', 0)
+        c.tournament_wins += 1 if d.get('finish') == 1 else 0
+        c.tournament_top8s += 1 if (d.get('finish') or sys.maxsize) <= 8 else 0
+        c.perfect_runs += 1 if d.get('source_name') == 'League' and d.get('wins', 0) >= 5 and d.get('losses', 0) == 0 else 0
+        if d.competition_type_name == 'Gatherling':
+            c.decks_tournament.append(d)
+            c.wins_tournament += (d.get('wins') or 0)
+            c.losses_tournament += (d.get('losses') or 0)
+            c.draws_tournament += (d.get('draws') or 0)
+    if c.wins or c.losses:
+        c.win_percent = round((c.wins / (c.wins + c.losses)) * 100, 1)
+    else:
+        c.win_percent = ''
+    if c.wins_tournament or c.losses_tournament:
+        c.win_percent_tournament = round((c.wins_tournament / (c.wins_tournament + c.losses_tournament)) * 100, 1)
+    else:
+        c.win_percent_tournament = ''
+    c.num_decks = len(c.decks)
+    c.num_decks_tournament = len(c.decks_tournament)
+    c.played_competitively = c.wins or c.losses or c.draws
+    return c
+
+def playability(retry: bool = False) -> Dict[str, float]:
+    sql = """
+        SELECT
+            name,
+            playability
+        FROM
+            _playability
+    """
+    try:
+        return {r['name']: r['playability'] for r in db().select(sql)}
+    except DatabaseException as e:
+        if not retry:
+            print(f"Got {e} trying to get playability so trying to preaggregate. If this is happening on user time that's undesirable.")
+            preaggregate_playability()
+            return playability(retry=True)
+        print(f'Failed to preaggregate. Giving up.')
+        raise e
+
+def preaggregate() -> None:
+    preaggregate_card()
+    preaggregate_card_person()
+    preaggregate_playability()
+
+def preaggregate_card() -> None:
+    db().execute('DROP TABLE IF EXISTS _new_card_stats')
+    db().execute("""
+        CREATE TABLE IF NOT EXISTS _new_card_stats (
+            name VARCHAR(190) NOT NULL,
+            season_id INT NOT NULL,
+            num_decks INT NOT NULL,
+            wins INT NOT NULL,
+            losses INT NOT NULL,
+            draws INT NOT NULL,
+            perfect_runs INT NOT NULL,
+            tournament_wins INT NOT NULL,
+            tournament_top8s INT NOT NULL,
+            wins_tournament INT NOT NULL,
+            losses_tournament INT NOT NULL,
+            draws_tournament INT NOT NULL,
+            PRIMARY KEY (season_id, name),
+            FOREIGN KEY (season_id) REFERENCES season (id) ON UPDATE CASCADE ON DELETE CASCADE
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci AS
+        SELECT
+            card AS name,
+            season.id AS season_id,
+            SUM(CASE WHEN d.id IS NOT NULL THEN 1 ELSE 0 END) AS num_decks,
+            IFNULL(SUM(wins), 0) AS wins,
+            IFNULL(SUM(losses), 0) AS losses,
+            IFNULL(SUM(draws), 0) AS draws,
+            SUM(CASE WHEN wins >= 5 AND losses = 0 AND d.source_id IN (SELECT id FROM source WHERE name = 'League') THEN 1 ELSE 0 END) AS perfect_runs,
+            SUM(CASE WHEN dsum.finish = 1 THEN 1 ELSE 0 END) AS tournament_wins,
+            SUM(CASE WHEN dsum.finish <= 8 THEN 1 ELSE 0 END) AS tournament_top8s,
+            SUM(CASE WHEN (d.id IS NOT NULL) AND (ct.name = 'Gatherling') THEN 1 ELSE 0 END) AS num_decks_tournament,
+            IFNULL(SUM(CASE WHEN ct.name = 'Gatherling' THEN wins ELSE 0 END), 0) AS wins_tournament,
+            IFNULL(SUM(CASE WHEN ct.name = 'Gatherling' THEN losses ELSE 0 END), 0) AS losses_tournament,
+            IFNULL(SUM(CASE WHEN ct.name = 'Gatherling' THEN draws ELSE 0 END), 0) AS draws_tournament
+        FROM
+            deck AS d
+        INNER JOIN
+            deck_card AS dc ON d.id = dc.deck_id
+        {competition_join}
+        {season_join}
+        {nwdl_join}
+        GROUP BY
+            card,
+            season.id
+    """.format(competition_join=query.competition_join(),
+               season_join=query.season_join(),
+               nwdl_join=deck.nwdl_join()))
+    db().execute('DROP TABLE IF EXISTS _old_card_stats')
+    db().execute('CREATE TABLE IF NOT EXISTS _card_stats (_ INT)') # Prevent error in RENAME TABLE below if bootstrapping.
+    db().execute('RENAME TABLE _card_stats TO _old_card_stats, _new_card_stats TO _card_stats')
+    db().execute('DROP TABLE IF EXISTS _old_card_stats')
+
+def preaggregate_card_person() -> None:
+    db().execute('DROP TABLE IF EXISTS _new_card_person_stats')
+    db().execute("""
+        CREATE TABLE IF NOT EXISTS _new_card_person_stats (
+            name VARCHAR(190) NOT NULL,
+            season_id INT NOT NULL,
+            person_id INT NOT NULL,
+            wins INT NOT NULL,
+            losses INT NOT NULL,
+            draws INT NOT NULL,
+            perfect_runs INT NOT NULL,
+            tournament_wins INT NOT NULL,
+            tournament_top8s INT NOT NULL,
+            wins_tournament INT NOT NULL,
+            losses_tournament INT NOT NULL,
+            draws_tournament INT NOT NULL,
+            PRIMARY KEY (season_id, person_id, name),
+            FOREIGN KEY (season_id) REFERENCES season (id) ON UPDATE CASCADE ON DELETE CASCADE,
+            INDEX idx_person_id_name (person_id, name)
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci AS
+        SELECT
+            card AS name,
+            season.id AS season_id,
+            d.person_id,
+            SUM(CASE WHEN d.id IS NOT NULL THEN 1 ELSE 0 END) AS num_decks,
+            IFNULL(SUM(wins), 0) AS wins,
+            IFNULL(SUM(losses), 0) AS losses,
+            IFNULL(SUM(draws), 0) AS draws,
+            SUM(CASE WHEN wins >= 5 AND losses = 0 AND d.source_id IN (SELECT id FROM source WHERE name = 'League') THEN 1 ELSE 0 END) AS perfect_runs,
+            SUM(CASE WHEN dsum.finish = 1 THEN 1 ELSE 0 END) AS tournament_wins,
+            SUM(CASE WHEN dsum.finish <= 8 THEN 1 ELSE 0 END) AS tournament_top8s,
+            SUM(CASE WHEN (d.id IS NOT NULL) AND (ct.name = 'Gatherling') THEN 1 ELSE 0 END) AS num_decks_tournament,
+            IFNULL(SUM(CASE WHEN ct.name = 'Gatherling' THEN wins ELSE 0 END), 0) AS wins_tournament,
+            IFNULL(SUM(CASE WHEN ct.name = 'Gatherling' THEN losses ELSE 0 END), 0) AS losses_tournament,
+            IFNULL(SUM(CASE WHEN ct.name = 'Gatherling' THEN draws ELSE 0 END), 0) AS draws_tournament
+        FROM
+            deck AS d
+        INNER JOIN
+            deck_card AS dc ON d.id = dc.deck_id
+        {competition_join}
+        {season_join}
+        {nwdl_join}
+        GROUP BY
+            card,
+            d.person_id,
+            season.id
+    """.format(competition_join=query.competition_join(),
+               season_join=query.season_join(),
+               nwdl_join=deck.nwdl_join()))
+    db().execute('DROP TABLE IF EXISTS _old_card_person_stats')
+    db().execute('CREATE TABLE IF NOT EXISTS _card_person_stats (_ INT)') # Prevent error in RENAME TABLE below if bootstrapping.
+    db().execute('RENAME TABLE _card_person_stats TO _old_card_person_stats, _new_card_person_stats TO _card_person_stats')
+    db().execute('DROP TABLE IF EXISTS _old_card_person_stats')
+
+def preaggregate_playability() -> None:
     sql = """
         SELECT
             card AS name,
-            COUNT(card) AS `all.n_decks`,
-            SUM(CASE WHEN maindeck_n > 0 THEN 1 ELSE 0 END) AS `all.n_maindecks`,
-            SUM(CASE WHEN sideboard_n > 0 THEN 1 ELSE 0 END) AS `all.n_sideboards`,
-            SUM(maindeck_n + sideboard_n) AS `all.count_decks`,
-            SUM(maindeck_n) AS `all.count_maindecks`,
-            SUM(sideboard_n) AS `all.count_sideboards`,
-            SUM(wins) AS `all.wins`,
-            SUM(losses) AS `all.losses`,
-            SUM(draws) AS `all.draws`,
-            IFNULL(ROUND((SUM(wins) / SUM(wins + losses)) * 100, 1), '') AS `all.win_percent`,
-
-            SUM(CASE WHEN created_date >= %s THEN 1 ELSE 0 END) AS `season.n_decks`,
-            SUM(CASE WHEN created_date >= %s AND maindeck_n > 0 THEN 1 ELSE 0 END) AS `season.n_maindecks`,
-            SUM(CASE WHEN created_date >= %s AND sideboard_n > 0 THEN 1 ELSE 0 END) AS `season.n_sideboards`,
-            SUM(CASE WHEN created_date >= %s THEN maindeck_n + sideboard_n ELSE 0 END) AS `season.count_decks`,
-            SUM(CASE WHEN created_date >= %s THEN maindeck_n ELSE 0 END) AS `season.count_maindecks`,
-            SUM(CASE WHEN created_date >= %s THEN sideboard_n ELSE 0 END) AS `season.count_sideboards`,
-            SUM(CASE WHEN created_date >= %s THEN wins ELSE 0 END) AS `season.wins`,
-            SUM(CASE WHEN created_date >= %s THEN losses ELSE 0 END) AS `season.losses`,
-            SUM(CASE WHEN created_date >= %s THEN draws ELSE 0 END) AS `season.draws`,
-            ROUND((SUM(CASE WHEN created_date >= %s THEN wins ELSE 0 END) / SUM(CASE WHEN created_date >= %s THEN wins ELSE 0 END + CASE WHEN created_date >= %s THEN losses ELSE 0 END)) * 100, 1) AS `season.win_percent`
+            COUNT(*) AS played
         FROM
-            (SELECT
-                d.created_date,
-                d.person_id,
-                dc.card,
-                SUM(CASE WHEN NOT dc.sideboard THEN n ELSE 0 END) AS maindeck_n,
-                SUM(CASE WHEN dc.sideboard THEN n ELSE 0 END) AS sideboard_n,
-                d.wins,
-                d.draws,
-                d.losses
-            FROM
-                deck_card AS dc
-            INNER JOIN
-                deck AS d ON d.id = dc.deck_id
-            GROUP BY
-                deck_id, card) AS deck_card_agg
-        WHERE {where}
-        GROUP BY card
-        ORDER BY `season.n_decks` DESC, `season.count_decks` DESC, `season.n_maindecks` DESC, `season.count_maindecks` DESC, `all.n_decks` DESC, `all.count_decks` DESC, `all.n_maindecks` DESC, `all.count_maindecks` DESC
-    """.format(where=where)
-    cs = [Container(r) for r in db().execute(sql, [rotation.last_rotation().timestamp()] * 12)]
-    cards = oracle.cards_by_name()
-    for c in cs:
-        c.update(cards[c.name])
-    return cs
-
-def load_card(name):
-    c = guarantee.exactly_one(oracle.load_cards([name]))
-    c.decks = deck.load_decks('d.id IN (SELECT deck_id FROM deck_card WHERE card = {name})'.format(name=sqlescape(name)))
-    c.season = Container()
-    c.all = Container()
-    c.all.wins = sum(filter(None, [d.wins for d in c.decks]))
-    c.all.losses = sum(filter(None, [d.losses for d in c.decks]))
-    c.all.draws = sum(filter(None, [d.draws for d in c.decks]))
-    if c.all.wins or c.all.losses or c.all.draws:
-        c.all.win_percent = round((c.all.wins / (c.all.wins + c.all.losses)) * 100, 1)
-    else:
-        c.all.win_percent = ''
-    c.all.num_decks = len(c.decks)
-    season_decks = [d for d in c.decks if d.created_date > rotation.last_rotation()]
-    c.season.wins = sum(filter(None, [d.wins for d in season_decks]))
-    c.season.losses = sum(filter(None, [d.losses for d in season_decks]))
-    c.season.draws = sum(filter(None, [d.draws for d in season_decks]))
-    if c.season.wins or c.season.losses or c.season.draws:
-        c.season.win_percent = round((c.season.wins / (c.season.wins + c.season.losses)) * 100, 1)
-    else:
-        c.season.win_percent = ''
-    c.season.num_decks = len(season_decks)
-    c.played_competitively = c.all.wins or c.all.losses or c.all.draws
-    return c
-
-def only_played_by(person_id):
+            deck_card
+        GROUP BY
+            card
+    """
+    rs = db().select(sql)
+    high = max([r['played'] for r in rs] + [0])
+    db().execute('DROP TABLE IF EXISTS _new_playability')
     sql = """
-        SELECT card AS name, p.id
-        FROM deck_card AS dc
-        INNER JOIN deck AS d ON d.id = dc.deck_id
-        INNER JOIN person AS p ON p.id = d.person_id
-        GROUP BY card
-        HAVING COUNT(DISTINCT p.id) = 1 AND p.id = {person_id} AND SUM(d.wins + d.draws + d.losses) > 0
-    """.format(person_id=sqlescape(person_id))
-    cs = [Container(r) for r in db().execute(sql)]
-    cards = {c.name: c for c in oracle.load_cards()}
-    for c in cs:
-        c.update(cards[c.name])
-    return cs
+        CREATE TABLE IF NOT EXISTS _new_playability (
+            name VARCHAR(190) NOT NULL,\
+            playability DECIMAL(3,2),
+            PRIMARY KEY (name)
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci AS
+        SELECT
+            card AS name,
+            ROUND(COUNT(*) / {high}, 2) AS playability
+        FROM
+            deck_card
+        GROUP BY
+            card
+    """.format(high=high)
+    db().execute(sql)
+    db().execute('DROP TABLE IF EXISTS _old_playability')
+    db().execute('CREATE TABLE IF NOT EXISTS _playability (_ INT)') # Prevent error in RENAME TABLE below if bootstrapping.
+    db().execute('RENAME TABLE _playability TO _old_playability, _new_playability TO _playability')
+    db().execute('DROP TABLE IF EXISTS _old_playability')
+
+def card_exists(name: str) -> bool:
+    sql = 'SELECT EXISTS(SELECT * FROM deck_card WHERE card = %s LIMIT 1)'
+    return bool(db().value(sql, [name]))

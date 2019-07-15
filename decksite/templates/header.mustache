@@ -5,7 +5,6 @@
         <title>{{title}}</title>
         <link rel="stylesheet" type="text/css" href="{{css_url}}">
         <link rel="stylesheet" type="text/css" href="//cdn.jsdelivr.net/npm/keyrune@latest/css/keyrune.css">
-        <link rel="stylesheet" href="//cdn.jsdelivr.net/tipped/4.0.10/css/tipped/tipped.css">
         <link rel="icon" sizes="16x16 32x32 48x48 64x64" href="{{favicon_url}}">
         <!--[if IE]><link rel="shortcut icon" href="{{favicon_url}}"><![endif]-->
         <link rel="apple-touch-icon-precomposed" href="{{favicon_152_url}}">
@@ -17,9 +16,25 @@
             <meta property="og:site_name" content="Penny Dreadful Magic">
             <meta property="og:description" content="{{og_description}}">
         {{/og_title}}
+        {{#oembed_url}}
+            <link rel="alternate" type="application/json+oembed"
+                href="{{oembed_url}}"
+                title="Penny Dreadful Magic" />
+        {{/oembed_url}}
+        <meta name=viewport content="width=device-width, initial-scale=1">
+        <meta name="google-site-verification" content="5cg_JSKOouPW66K4NuMdm9bQHV9CWH9iVszTByzeDPg">
     </head>
     <body>
-        {{> menu}}
-        <div class="content">
+        <header class="season-{{season_id}}">
+            {{> language_switcher}}
             <h1><a href="{{home_url}}">Penny Dreadful Magic</a></h1>
-            <div class="main">
+            <div class="search">
+                {{> search}}
+            </div>
+        </header>
+        <nav>
+            {{> menu}}
+        </nav>
+        <main>
+            {{> intro}}
+            <div id="content">

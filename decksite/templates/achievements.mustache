@@ -1,0 +1,54 @@
+{{> banner}}
+<section>
+    {{#achievements}}
+        <div class="achievement-category">
+            <div class="achievement-bar has-more-info">
+                {{#legend}}
+                    <span class="earned" title="{{legend}}">🏆</span>
+                {{/legend}}
+                <span class="background"></span>
+                <span class="bar" style="width: {{percent}}%"></span>
+                <span class="summary"><b>{{title}}</b> {{summary}}</span>
+                <span class="expansion-indicator">▾</span>
+            </div>
+            <div class="more-info">
+                <p>{{{description_safe}}}</p>
+                {{#has_leaderboard}}
+                    {{> spinner}}
+                    <table class="with-marginalia">
+                        <thead>
+                            <tr>
+                                <td class="marginalia"></td>
+                                <th>Person</th>
+                                <th data-sortInitialOrder="desc">{{leaderboard_heading}}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{#leaderboard}}
+                                <tr class="pos-{{pos}}">
+                                    <td class="n marginalia">
+                                        {{position}}
+                                    </td>
+                                    <td><a href="{{url}}" class="person">{{person}}</a></td>
+                                    <td class="n">{{points}}</td>
+                                </tr>
+                            {{/leaderboard}}
+                        </tbody>
+                    </table>
+                {{/has_leaderboard}}
+                {{#legend}}
+                    <p class="detail">
+                        <span class="earned">🏆</span>
+                        <span class="text">{{legend}}</span>
+                    </p>
+                {{/legend}}
+            </div>
+        </div>
+    {{/achievements}}
+</section>
+<section>
+    <h2>Key</h2>
+    <ul>
+        <li>🏆 = earned</li>
+    </ul>
+</section>

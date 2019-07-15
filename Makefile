@@ -1,4 +1,4 @@
-.PHONY: default push test unit lint shortlint readme coverage branch popclean
+.PHONY: default push test check unit functional lint types imports fiximports readme coverage branch popclean
 
 # This is the first thing in the makefile so it is the default when just "make" is run
 # and something else doesn't get run by accident.
@@ -7,10 +7,20 @@ default:
 
 # Push your commits (safely) to the remote branch.
 push:
-	git pull origin master && make test && git push --set-upstream origin `git rev-parse --abbrev-ref HEAD`
+	@git pull origin master && make test && git push --set-upstream origin `git rev-parse --abbrev-ref HEAD`
 
 # Run all unit and syntax tests.
-test: unit lint
+test: check unit
+
+# Run all typechecking and linting.
+check: lint types imports
+
+# Create a pull request, requies 'hub' from github.
+pr:
+	hub pull-request
+
+# Run all tests, push and create pull request.
+release: push pr
 
 # Run unit tests.
 TEST=.
@@ -18,7 +28,23 @@ unit:
 	@echo
 	@echo "******************************** Unit Tests ***********************************"
 	@echo
-	@pytest --junitxml=test_results.xml -k $(TEST) -m "not slowtest"
+	@find . -name "*$(TEST)*" | grep _test.py$$ | xargs python3 dev.py tests -x -m "not functional and not perf"
+	@echo
+
+# Run functional tests.
+functional:
+	@echo
+	@echo "******************************** Functional Tests ******************************"
+	@echo
+	@find . -name "*$(TEST)*" | grep _test.py$$ | xargs python3 dev.py tests -x -m "functional"
+	@echo
+
+# Run perf tests.
+perf:
+	@echo
+	@echo "******************************** Performance Tests *****************************"
+	@echo
+	@find . -name "*$(TEST)*" | grep _test.py$$ | xargs python3 dev.py tests -x -m "perf"
 	@echo
 
 # Run lint on all python files.
@@ -26,14 +52,27 @@ lint:
 	@echo
 	@echo "******************************** Lint *****************************************"
 	@echo
-	@find . -name "*.py" | grep -v .git | xargs pylint -f parseable
+	@python3 dev.py pylint
 	@echo
 
-shortlint:
+types:
 	@echo
-	@echo "******************************** Lint *****************************************"
+	@echo "******************************** Typechecking *********************************"
+	@python3 dev.py types
 	@echo
-	@find . -name "*.py" | grep -v .git | xargs pylint -f parseable -E
+
+imports:
+	@echo
+	@echo "******************************** Import Ordering ******************************"
+	@echo
+	@python3 dev.py imports
+	@echo
+
+fiximports:
+	@echo
+	@echo "******************************** Import Ordering ******************************"
+	@echo
+	@python3 dev.py fiximports
 	@echo
 
 readme:
@@ -43,7 +82,6 @@ readme:
 	@python3 generate_readme.py
 	@echo
 
-
 coverage:
 	@echo
 	@echo "******************************** Test Coverage ********************************"
@@ -51,6 +89,7 @@ coverage:
 	@coverage run run.py tests
 	@coverage xml
 	@coverage report
+	@echo
 
 # Make a branch based off of current (remote) master with all your local changes preserved (but not added).
 branch:
@@ -61,4 +100,3 @@ branch:
 # This cleans up for you.
 popclean:
 	@git stash pop 2>&1 | grep already | cut -d' ' -f1 | xargs rm && git stash pop
-

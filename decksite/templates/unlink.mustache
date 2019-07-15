@@ -1,0 +1,24 @@
+<h1>{{page_title}}</h1>
+{{#message}}
+    <p>{{message}}</p>
+{{/message}}
+{{#errors}}
+    <p class="error">{{.}}</p>
+{{/errors}}
+<section>
+    <h2>Remove any discord id from specific person</h2>
+    <form method="post">
+        {{> persondropdown}}
+        <button type="submit">Unlink</button>
+    </form>
+</section>
+<section>
+    <h2>Remove specific discord id from all people</h2>
+    <form method="post">
+        <div>
+            <label for="discord_id">Discord ID</label>
+            <input type="text" name="discord_id">
+        </div>
+        <button type="submit">Unlink</button>
+    </form>
+</section>

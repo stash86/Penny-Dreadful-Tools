@@ -13,6 +13,9 @@ class InvalidDataException(PDException):
 class DatabaseException(PDException):
     pass
 
+class DatabaseMissingException(DatabaseException):
+    pass
+
 class DoesNotExistException(PDException):
     pass
 
@@ -23,4 +26,13 @@ class TooFewItemsException(PDException):
     pass
 
 class InvalidArgumentException(PDException):
+    pass
+
+class LockNotAcquiredException(DatabaseException):
+    pass
+
+class AlreadyExistsException(PDException):
+    pass
+
+class NotConfiguredException(PDException):
     pass

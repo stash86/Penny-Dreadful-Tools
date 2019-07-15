@@ -1,11 +1,16 @@
 import re
+from typing import Optional
+
+from discord.client import Client
 
 from magic import oracle
+from magic.models import Card
 
-def find_emoji(emoji, client):
+
+def find_emoji(emoji: str, client: Client) -> Optional[str]:
     try:
-        for server in client.servers:
-            emojis = server.emojis
+        for guild in client.guilds:
+            emojis = guild.emojis
             res = next((x for x in emojis if x.name == emoji), None)
             if res is not None:
                 return res
@@ -13,7 +18,7 @@ def find_emoji(emoji, client):
     except AttributeError:
         return None
 
-def replace_emoji(text, client):
+def replace_emoji(text: str, client: Client) -> str:
     if text is None:
         return ''
     output = text
@@ -31,13 +36,15 @@ def replace_emoji(text, client):
             output = output.replace('{' + symbol + '}', str(emoji))
     return output
 
-def legal_emoji(c, verbose=False):
-    if c.name in oracle.legal_cards():
-        s = ':white_check_mark:'
-        if c.bug_desc is not None:
-            s += ":beetle:"
-    else:
-        s = ':no_entry_sign:'
-        if verbose:
-            s += ' (not legal in PD)'
+def info_emoji(c: Card, verbose: bool = False, show_legality: bool = True) -> str:
+    s = ''
+    if show_legality:
+        if c.name in oracle.legal_cards():
+            s += ':white_check_mark:'
+        else:
+            s += ':no_entry_sign:'
+            if verbose:
+                s += ' (not legal in PD)'
+    if c.bugs:
+        s += ':beetle:'
     return s

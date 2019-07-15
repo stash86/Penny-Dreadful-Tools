@@ -1,14 +1,48 @@
-                <script src="//code.jquery.com/jquery-latest.min.js" type="text/javascript"></script>
-                <script src="//cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.27.8/js/jquery.tablesorter.min.js" type="text/javascript"></script>
-                <script src="//cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.27.8/js/jquery.tablesorter.widgets.min.js" type="text/javascript"></script>
-                {{#tooltips_url}}
-                    <script src="{{tooltips_url}}" type="text/javascript"></script>
-                {{/tooltips_url}}
-                <script src="//cdn.jsdelivr.net/g/tipped@4.0.10(js/tipped/tipped.js+js/imagesloaded/imagesloaded.pkgd.min.js)"></script>
-                <script src="{{js_url}}" type="text/javascript"></script>
-                <script src="//cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js" type="text/javascript"></script>
-                <script src="//cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.13/moment-timezone-with-data.min.js" type="text/javascript"></script>
-            </div> {{! .main}}
-        </div> {{! .content}}
+            </div> {{! #content }}
+        </main>
+        <footer>
+            {{#menu}}
+                <section {{#admin_only}}class="admin"{{/admin_only}}>
+                    <p><b><a class="menuitem" href="{{url}}">{{name}}</a></b></p>
+                    {{#submenu}}
+                        <p><a {{#is_external}}class="external"{{/is_external}} href="{{url}}">{{name}}</a></p>
+                    {{/submenu}}
+                </section>
+            {{/menu}}
+            <section>
+                <p>Penny Dreadful tournaments are sponsored by <a class="external" href="https://www.cardhoarder.com/">Cardhoarder</a>.</p>
+                <p><a href="https://www.cardhoarder.com/"><img class="sponsor-logo" src="{{cardhoarder_logo_url}}" alt=""></a></p>
+            </section>
+            <section>
+                <p>The Penny Dreadful league is sponsored by <a class="external" href="https://www.mtgotraders.com/">MTGO Traders</a>.</p>
+                <p><a href="https://www.mtgotraders.com/"><img class="sponsor-logo" src="{{mtgotraders_logo_url}}" alt=""></a></p>
+            </section>
+            <section>
+                {{> contact}}
+            </section>
+        </footer>
+        <footer class="status-bar">
+            <p class="loading"><span class="spinner"></span> <span class="text">Loading…</span></p>
+        </footer>
+        <script defer src="//code.jquery.com/jquery-latest.min.js"></script>
+        {{#tooltips_url}}
+            <script defer src="{{tooltips_url}}"></script>
+        {{/tooltips_url}}
+        <script defer src="//cdnjs.cloudflare.com/ajax/libs/jquery.hoverintent/1.9.0/jquery.hoverIntent.min.js"></script>
+        <script defer src="//cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.27.8/js/jquery.tablesorter.min.js"></script>
+        <script defer src="//cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.27.8/js/jquery.tablesorter.widgets.min.js"></script>
+        <script defer src="//cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js"></script>
+        <script defer src="//cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.13/moment-timezone-with-data.min.js"></script>
+        <script defer src="//cdnjs.cloudflare.com/ajax/libs/jquery-footable/3.1.6/footable.min.js"></script>
+        <script defer src="//cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.3/Chart.min.js"></script>
+        <script defer src="//cdn.jsdelivr.net/g/tipped@4.0.10(js/tipped/tipped.js+js/imagesloaded/imagesloaded.pkgd.min.js)"></script>
+        <script defer src="{{js_url}}"></script>
+        <script async src="https://www.googletagmanager.com/gtag/js?id=UA-109131120-1"></script>
+        <script>
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'UA-109131120-1');
+        </script>
     </body>
 </html>

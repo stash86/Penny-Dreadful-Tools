@@ -1,36 +1,38 @@
+{{> banner}}
 <section>
-    <h2>People</h2>
+    {{> spinner}}
     <table>
         <thead>
             <tr>
-                <td></td>
-                <th class="legend" colspan="3" data-sortInitialOrder="desc">This Season</th>
-                <th class="legend" colspan="3" data-sortInitialOrder="desc">All Time</th>
-            </tr>
-            <tr>
                 <th>Name</th>
-                <th data-sortInitialOrder="desc">Decks</th>
-                <th data-sortInitialOrder="desc">Record</th>
-                <th class="divider" data-sortInitialOrder="desc">Win %</th>
-                <th data-sortInitialOrder="desc">Decks</th>
-                <th data-sortInitialOrder="desc">Record</th>
-                <th data-sortInitialOrder="desc">Win %</th>
+                <th class="n" data-sortInitialOrder="desc">Decks</th>
+                <th class="n" data-sortInitialOrder="desc">Record</th>
+                <th class="n" data-sortInitialOrder="desc">Win %</th>
+                <th class="n" data-sortInitialOrder="desc">
+                    <abbr title="Tournament wins">①</abbr>
+                </th>
+                <th class="n" data-sortInitialOrder="desc">
+                    <abbr title="Tournament top-8s">⑧</abbr>
+                </th>
+                <th class="n divider" data-sortInitialOrder="desc">
+                    <abbr title="League 5-0 runs">5–0s</abbr>
+                </th>
+                <th class="n" data-sortInitialOrder="desc">Elo</th>
             </tr>
         </thead>
         {{#people}}
-            <tr>
-                <td><a href="{{url}}">{{name}}</a></td>
-                {{#season}}
-                    <td class="n"><a href="{{url}}">{{num_decks}}</a></td>
-                    <td class="n">{{> record}}</td>
-                    <td class="n divider">{{#show_record}}<a href="{{url}}">{{win_percent}}</a>{{/show_record}}</td>
-                {{/season}}
-                {{#all}}
-                    <td class="n"><a href="{{url}}">{{num_decks}}</a></td>
-                    <td class="n">{{> record}}</td>
-                    <td class="n">{{#show_record}}<a href="{{url}}">{{win_percent}}</a>{{/show_record}}</td>
-                {{/all}}
-            </tr>
+            {{#num_decks}}
+                <tr>
+                    <td><a href="{{url}}">{{name}}</a></td>
+                        <td class="n"><a href="{{url}}">{{num_decks}}</a></td>
+                        <td class="n">{{#show_record}}{{wins}}–{{losses}}{{#draws}}–{{draws}}{{/draws}}{{/show_record}}</td>
+                        <td class="n">{{#show_record}}<a href="{{url}}">{{win_percent}}</a>{{/show_record}}</td>
+                        <td class="n">{{#tournament_top8s}}{{tournament_wins}}{{/tournament_top8s}}</td>
+                        <td class="n">{{#tournament_top8s}}{{tournament_top8s}}{{/tournament_top8s}}</td>
+                        <td class="n divider">{{#perfect_runs}}{{perfect_runs}}{{/perfect_runs}}</td>
+                        <td class="n">{{#show_record}}<a href="{{url}}">{{elo}}</a>{{/show_record}}</td>
+                </tr>
+            {{/num_decks}}
         {{/people}}
     </table>
 </section>

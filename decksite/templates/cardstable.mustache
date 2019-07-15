@@ -1,65 +1,36 @@
-<table>
+{{> spinner}}
+<table {{#is_very_large}}class="very-large"{{/is_very_large}}>
     <thead>
         <tr>
-            <td></td>
-            <th class="legend" colspan="8" data-sortInitialOrder="desc">This Season</th>
-            <th class="legend" colspan="8" data-sortInitialOrder="desc">All Time</th>
-        </tr>
-        <tr>
-            <td></td>
-            <th class="legend" colspan="3" data-sortInitialOrder="desc"># Decks</th>
-            <th class="legend" colspan="3" data-sortInitialOrder="desc"># Cards</th>
-            <td></td>
-            <td class="divider"></td>
-            <th class="legend" colspan="3" data-sortInitialOrder="desc"># Decks</th>
-            <th class="legend" colspan="3" data-sortInitialOrder="desc"># Cards</th>
-            <td></td>
-            <td></td>
-        <tr>
-        <tr>
             <th>Card</th>
-            <th data-sortInitialOrder="desc">Total</th>
-            <th data-sortInitialOrder="desc">Main</th>
-            <th data-sortInitialOrder="desc">Side</th>
-            <th data-sortInitialOrder="desc">Total</th>
-            <th data-sortInitialOrder="desc">Main</th>
-            <th data-sortInitialOrder="desc">Side</th>
-            <th data-sortInitialOrder="desc">Record</th>
-            <th class="divider" data-sortInitialOrder="desc">Win %</th>
-            <th data-sortInitialOrder="desc">Total</th>
-            <th data-sortInitialOrder="desc">Main</th>
-            <th data-sortInitialOrder="desc">Side</th>
-            <th data-sortInitialOrder="desc">Total</th>
-            <th data-sortInitialOrder="desc">Main</th>
-            <th data-sortInitialOrder="desc">Side</th>
-            <th data-sortInitialOrder="desc">Record</th>
-            <th data-sortInitialOrder="desc">Win %</th>
+            <th class="n" data-sortInitialOrder="desc"># Decks</th>
+            <th class="n" data-breakpoints="xs" data-sortInitialOrder="desc">Record</th>
+            <th class="n" data-breakpoints="xs" data-sortInitialOrder="desc">Win %</th>
+            <th class="n" data-breakpoints="xs" data-sortInitialOrder="desc">
+                <abbr title="Tournament wins">①</abbr>
+            </th>
+            <th class="n" data-breakpoints="xs" data-sortInitialOrder="desc">
+                <abbr title="Tournament top-8s">⑧</abbr>
+            </th>
+            <th class="n" data-breakpoints="xs" data-sortInitialOrder="desc">
+                <abbr title="League 5-0 runs">5–0s</abbr>
+            </th>
+            {{! Empty column to hold the toggle when footable kicks in.}}
+            <td></td>
         </tr>
     </thead>
     <tbody>
         {{#cards}}
-            <tr>
+            <tr class="cardrow" data-cardname="{{name}}">
                 <td>{{> singlecard}}</td>
-                {{#season}}
-                    <td class="n">{{n_decks}}</td>
-                    <td class="n">{{n_maindecks}}</td>
-                    <td class="n divider">{{n_sideboards}}</td>
-                    <td class="n">{{count_decks}}</td>
-                    <td class="n">{{count_maindecks}}</td>
-                    <td class="n divider">{{count_sideboards}}</td>
-                    <td class="n">{{> record}}</td>
-                    <td class="n divider">{{#show_record}}{{win_percent}}{{/show_record}}</td>
-                {{/season}}
-                {{#all}}
-                    <td class="n">{{n_decks}}</td>
-                    <td class="n">{{n_maindecks}}</td>
-                    <td class="n divider">{{n_sideboards}}</td>
-                    <td class="n">{{count_decks}}</td>
-                    <td class="n">{{count_maindecks}}</td>
-                    <td class="n divider">{{count_sideboards}}</td>
-                    <td class="n">{{> record}}</td>
-                    <td class="n">{{#show_record}}{{win_percent}}{{/show_record}}</td>
-                {{/all}}
+                <td class="n">{{num_decks}}</td>
+                <td class="n">{{#show_record}}{{wins}}–{{losses}}{{#draws}}–{{draws}}{{/draws}}{{/show_record}}</td>
+                <td class="n">{{#show_record}}{{win_percent}}{{/show_record}}</td>
+                <td class="n">{{#tournament_wins}}{{tournament_wins}}{{/tournament_wins}}</td>
+                <td class="n">{{#tournament_top8s}}{{tournament_top8s}}{{/tournament_top8s}}</td>
+                <td class="n">{{#perfect_runs}}{{perfect_runs}}{{/perfect_runs}}</td>
+                {{! Empty column to hold the toggle when footable kicks in.}}
+                <td></td>
             </tr>
         {{/cards}}
     </tbody>

@@ -1,25 +1,47 @@
-<h2>{{name}}</h2>
-<section>
-    <h3>Archetype Tree</h3>
-    {{> archetypetree}}
-</section>
-<section>
-    <h3>Most Common Cards</h3>
-    <ul>
-        {{#most_common_cards}}<li>{{> singlecard}}</li>{{/most_common_cards}}
-    </ul>
-</section>
-<section>
-    <h3>Top Decks</h3>
-    {{#best_decks}}{{> decktable}}{{/best_decks}}
-</section>
-<section>
-    <h3>Matchups</h3>
-    {{#matchups_container}}
+{{> banner}}
+{{#show_archetype_tree}}
+    <section>
+        <h2>Archetype Tree</h2>
         {{> archetypetree}}
-    {{/matchups_container}}
-</section>
+    </section>
+{{/show_archetype_tree}}
+{{^tournament_only}}
+    {{#has_most_common_cards}}
+        <section>
+            <h2>Most Common Cards</h2>
+            <ul>
+                {{#most_common_cards}}<li>{{> singlecard}}</li>{{/most_common_cards}}
+            </ul>
+        </section>
+    {{/has_most_common_cards}}
+    {{#show_record}}
+        <section>
+            <h2>Matchups</h2>
+            {{#matchups_container}}
+                {{> archetypetree}}
+            {{/matchups_container}}
+        </section>
+    {{/show_record}}
+{{/tournament_only}}
+{{#tournament_only}}
+    {{#has_most_common_cards_tournament}}
+        <section>
+            <h2>Most Common Cards</h2>
+            <ul>
+                {{#most_common_cards_tournament}}<li>{{> singlecard}}</li>{{/most_common_cards_tournament}}
+            </ul>
+        </section>
+    {{/has_most_common_cards_tournament}}
+    {{#show_records_tournament}}
+        <section>
+            <h2>Matchups</h2>
+            {{#matchups_container}}
+                {{> archetypetree}}
+            {{/matchups_container}}
+        </section>
+    {{/show_records_tournament}}
+{{/tournament_only}}
 <section>
-    <h3>All Decks</h3>
+    <h2>All Decks</h2>
     {{> decktable}}
 </section>

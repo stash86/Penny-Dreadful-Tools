@@ -1,44 +1,25 @@
+{{> banner}}
 <section>
-    <h2>{{name}}</h2>
-    <img src="{{img_url}}" alt="{{name}}" class="card-img">
+    <img src="{{img_url}}" alt="{{name}}" class="card-img {{card_img_class}}">
+    {{#bugs}}
+        <p class="bug-desc {{card_img_class}}"><b>{{classification}} bug</b> {{description}}</p>
+    {{/bugs}}
 </section>
 {{#played_competitively}}
-    <section>
-        <h2>Record</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th class="legend" colspan="3">This Season</th>
-                    <th class="legend" colspan="3">All Time</th>
-                </tr>
-                <tr>
-                    <th># Decks</th>
-                    <th>Record</th>
-                    <th class="divider">Win %</th>
-                    <th># Decks</th>
-                    <th>Record</th>
-                    <th>Win %</th>
-                </tr>
-            </thead>
-            <tbody>
-                {{#season}}
-                    <td class="n">{{num_decks}}</td>
-                    <td class="n">{{> record}}</td>
-                    <td class="n divider">{{win_percent}}</td>
-                {{/season}}
-                {{#all}}
-                    <td class="n">{{num_decks}}</td>
-                    <td class="n">{{> record}}</td>
-                    <td class="n">{{win_percent}}</td>
-                {{/all}}
-            </tbody>
-        </table>
-    </section>
+    {{> stats}}
 {{/played_competitively}}
+{{#has_most_common_cards}}
+    <section>
+        <h2>Most Commonly Played With</h2>
+        <ul>
+            {{#most_common_cards}}<li>{{> singlecard}}</li>{{/most_common_cards}}
+        </ul>
+    </section>
+{{/has_most_common_cards}}
 {{> legal}}
 {{#has_decks}}
     <section>
         <h2>Decks containing {{name}}</h2>
-        {{> decks}}
+        {{> decktable}}
     </section>
 {{/has_decks}}

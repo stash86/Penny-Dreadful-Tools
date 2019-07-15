@@ -1,0 +1,20 @@
+<h1>{{page_title}}</h1>
+<section>
+    <form method="post">
+        <div>
+            <label for="entry">Deck to Retire</label>
+            <select class="{{#form.errors.entry}}error {{/form.errors.entry}}deckselect" name="entry" id="entry">
+                <option value="">Choose…</option>
+                {{#form.entry_options}}
+                    <option value="{{value}}" {{#selected}}selected="selected"{{/selected}}>{{text}}</option>
+                {{/form.entry_options}}
+            </select>
+            <div class="error">{{form.errors.entry}}</div>
+        </div>
+        <button type="submit">Retire</button>
+        <div class="logout">{{_ Not you?}} <a href="{{logout_url}}">{{_ Log out}}</a></div>
+    </form>
+</section>
+<section>
+    {{> contact}}
+</section>

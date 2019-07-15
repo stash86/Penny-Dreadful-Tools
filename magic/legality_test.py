@@ -1,54 +1,52 @@
-from decksite.data import deck
+from magic import legality
+from magic.models import CardRef, Deck
 
-from magic import legality, oracle
 
-def test_legal_formats():
-    swamp = oracle.load_card('Swamp')
-    think_twice = oracle.load_card('Think Twice')
-    fork = oracle.load_card('Fork')
-
-    d = deck.Deck({'id': 0})
-    d.maindeck = [{'n': 59, 'card': swamp}]
+def test_legal_formats() -> None:
+    d = Deck({'id': 0})
+    d.maindeck = [CardRef('Swamp', 59)]
     d.sideboard = []
     assert len(d.all_cards()) == 59
     formats = legality.legal_formats(d)
     assert len(formats) == 0
 
-    d.maindeck = [{'n': 60, 'card': swamp}]
+    d.maindeck = [CardRef('Swamp', 60)]
     formats = legality.legal_formats(d)
     assert 'Penny Dreadful' in formats
     assert 'Legacy' in formats
+    assert 'Penny Dreadful EMN' in formats
 
     formats = legality.legal_formats(d, {'Penny Dreadful'})
     assert len(formats) == 1
     assert 'Penny Dreadful' in formats
     assert 'Legacy' not in formats
 
-    d.maindeck = [{'n': 55, 'card': swamp}, {'n': 5, 'card': think_twice}]
+    d.maindeck = [CardRef('Swamp', 55), CardRef('Think Twice', 5)]
     formats = legality.legal_formats(d)
     assert len(d.all_cards()) == 60
     assert len(legality.legal_formats(d)) == 0
 
-    d.maindeck = [{'n': 56, 'card': swamp}, {'n': 4, 'card': think_twice}]
+    d.maindeck = [CardRef('Swamp', 56), CardRef('Think Twice', 4)]
     formats = legality.legal_formats(d)
     assert 'Legacy' in formats
     assert 'Modern' in formats
 
-    d.sideboard = [{'n': 15, 'card': swamp}, {'n': 1, 'card': think_twice}]
+    d.sideboard = [CardRef('Swamp', 15), CardRef('Think Twice', 1)]
     formats = legality.legal_formats(d)
     assert len(legality.legal_formats(d)) == 0
 
-    d.maindeck = [{'n': 56, 'card': swamp}, {'n': 4, 'card': fork}]
-    d.sideboard = [{'n': 15, 'card': swamp}]
+    d.maindeck = [CardRef('Swamp', 56), CardRef('Fork', 4)]
+    d.sideboard = [CardRef('Swamp', 15)]
     formats = legality.legal_formats(d)
     assert 'Legacy' in formats
     assert 'Modern' not in formats
 
-    d.maindeck = [{'n': 60, 'card': swamp}]
-    d.sideboard = [{'n': 15, 'card': swamp}]
+    d.maindeck = [CardRef('Swamp', 60)]
+    d.sideboard = [CardRef('Swamp', 15)]
     formats = legality.legal_formats(d)
     assert 'Standard' in formats
     assert 'Modern' in formats
     assert 'Legacy' in formats
     assert 'Vintage' in formats
     assert 'Penny Dreadful' in formats
+    assert 'Penny Dreadful EMN' in formats

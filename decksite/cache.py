@@ -2,26 +2,35 @@ import binascii
 import datetime
 import functools
 import os
+from typing import Callable
 
-from flask import request, make_response
+from flask import make_response, request
 from werkzeug.contrib.cache import SimpleCache
 
-CACHE = SimpleCache()
+from decksite import get_season_id
+from magic import rotation
+from shared_web import localization
 
-def cached():
+CACHE = SimpleCache() # type: ignore
+
+def cached() -> Callable:
     return cached_impl(cacheable=True, must_revalidate=True, client_only=False, client_timeout=1 * 60 * 60, server_timeout=5 * 60)
 
 # pylint: disable=too-many-arguments
-def cached_impl(cacheable=False, must_revalidate=True, client_only=True, client_timeout=0, server_timeout=5 * 60, key='view{id}'):
+def cached_impl(cacheable: bool = False,
+                must_revalidate: bool = True,
+                client_only: bool = True,
+                client_timeout: int = 0,
+                server_timeout: int = 5 * 60,
+                key: str = 'view{id}{locale}') -> Callable:
     """
-
     @see https://jakearchibald.com/2016/caching-best-practices/
-        https://developers.google.com/web/fundamentals/performance/optimizing-content-efficiency/http-caching
+         https://developers.google.com/web/fundamentals/performance/optimizing-content-efficiency/http-caching
     """
-    def decorator(f):
+    def decorator(f: Callable) -> Callable:
         @functools.wraps(f)
         def decorated_function(*args, **kwargs):
-            cache_key = key.format(id=request.full_path) # include querystring
+            cache_key = key.format(id=request.full_path, locale=localization.get_locale()) # include querystring
             cache_policy = ''
             if not cacheable:
                 cache_policy += ', no-store' # tells the browser not to cache at all
@@ -42,7 +51,13 @@ def cached_impl(cacheable=False, must_revalidate=True, client_only=True, client_
                 else:
                     cache_policy += ', public'
 
-                cache_policy += ', max-age={client_timeout}'.format(client_timeout=client_timeout)
+                actual_client_timeout = client_timeout
+                actual_server_timeout = server_timeout
+                if get_season_id() and get_season_id() != 'all' and get_season_id() < rotation.current_season_num():
+                    actual_client_timeout = 7 * 24 * 60 * 60
+                    actual_server_timeout = 7 * 24 * 60 * 60
+
+                cache_policy += ', max-age={client_timeout}'.format(client_timeout=actual_client_timeout)
 
             headers = {}
             cache_policy = cache_policy.strip(',')
@@ -51,8 +66,9 @@ def cached_impl(cacheable=False, must_revalidate=True, client_only=True, client_
 
             client_etag = request.headers.get('If-None-Match')
 
-            response = CACHE.get(cache_key)
-            # respect the hard-refresh
+            response = CACHE.get(cache_key)  # type: ignore
+            # Respect a hard refresh from the client, if sent.
+            # Note: Safari/OSX does not send a Cache-Control (or any additional) header on a hard refresh so people using Safari can't bypass/refresh server cache.
             if response is not None and request.headers.get('Cache-Control', '') != 'no-cache':
                 headers['X-Cache'] = 'HIT from Server'
                 cached_etag = response.headers.get('ETag')
@@ -69,7 +85,7 @@ def cached_impl(cacheable=False, must_revalidate=True, client_only=True, client_
                     # - If you can find any faster random algorithm go for it.
                     response.headers.add('ETag', binascii.hexlify(os.urandom(4)))
                     response.headers.add('X-Last-Modified', str(now))
-                    CACHE.set(cache_key, response, timeout=server_timeout)
+                    CACHE.set(cache_key, response, timeout=actual_server_timeout)
 
             response.headers.extend(headers)
             return response

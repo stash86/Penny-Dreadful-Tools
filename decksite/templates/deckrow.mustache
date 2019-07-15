@@ -3,8 +3,11 @@
     <td>{{{colors_safe}}}</td>
     <td><a {{#decklist}}title="{{decklist}}"{{/decklist}}href="{{url}}">{{{name}}}</a></td>
     {{^hide_person}}
-        <td><a href="{{person_url}}">{{person}}</a></td>
+        <td><a href="{{person_url}}" class="person">{{person}}</a></td>
     {{/hide_person}}
+    {{#show_archetype}}
+        <td><a href="{{archetype_url}}">{{archetype_name}}</a></td>
+    {{/show_archetype}}
     {{^hide_source}}
         <td {{#source_sort}}data-text="{{source_sort}}"{{/source_sort}}>
             {{#competition_url}}<a href="{{competition_url}}">{{/competition_url}}
@@ -14,26 +17,32 @@
     {{/hide_source}}
     <td class="n">
         {{#competition_url}}<a href="{{competition_url}}">{{/competition_url}}
-        {{#show_record}}{{> record}}{{/show_record}}
+        {{> record}}
         {{#competition_url}}</a>{{/competition_url}}
     </td>
     {{#show_omw}}
         <td class="n">{{omw}}</td>
     {{/show_omw}}
-    <td class="c">
-        {{#top8_safe}}<a href="{{competition_url}}">{{/top8_safe}}
-        {{{top8_safe}}}
-        {{#top8_safe}}</a>{{/top8_safe}}
-    </td>
-    <td class="n" data-text="{{date_sort}}">
+    {{^hide_top8}}
+        <td class="c">
+            {{#top8_safe}}<a href="{{competition_url}}">{{/top8_safe}}
+            {{{top8_safe}}}
+            {{#top8_safe}}</a>{{/top8_safe}}
+        </td>
+    {{/hide_top8}}
+    <td data-text="{{date_sort}}">
         {{display_date}}
     </td>
     {{#similarity_score}}
         <td class="n">{{similarity_score}}%</td>
     {{/similarity_score}}
-    <td>
-        {{#has_legal_format}}
-            {{{legal_icons}}}
-        {{/has_legal_format}}
-    </td>
+    {{#show_legal_seasons}}
+        <td>
+            {{#has_legal_format}}
+                {{{legal_icons}}}
+            {{/has_legal_format}}
+        </td>
+    {{/show_legal_seasons}}
+    {{! Empty column to hold the toggle when footable kicks in.}}
+    <td></td>
 </tr>

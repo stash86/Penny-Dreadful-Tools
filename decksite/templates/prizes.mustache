@@ -1,0 +1,17 @@
+<h1>Prizes</h1>
+{{#weeks}}
+    <section>
+        <h2>{{subject}}</h2>
+        <pre>{{body}}
+        </pre>
+        <p>{{n}} competitions</p>
+    </section>
+{{/weeks}}
+{{#months}}
+    <section>
+        <h2>{{competition_name}}</h2>
+        {{#people}}
+            {{mtgo_username}}<br>
+        {{/people}}
+    </section>
+{{/months}}

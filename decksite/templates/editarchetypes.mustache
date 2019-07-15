@@ -1,5 +1,7 @@
+<h1>Archetypes</h1>
 <section>
     <h2>Queue</h2>
+    {{> spinner}}
     <form method="post" class="inline">
         <table>
             <thead>
@@ -8,8 +10,8 @@
                     <th>Deck Name</th>
                     <th>Source</th>
                     <th>Current</th>
-                    <th>Similar Deck</th>
-                    <th>Suggested</th>
+                    <th class="n" data-sortInitialOrder="desc">Similarity</th>
+                    <th>Matches Rule</th>
                     <th>Assign To</th>
             </thead>
             <tbody>
@@ -18,14 +20,9 @@
                         <td>{{{colors_safe}}}</td>
                         <td><a href="{{url}}" title="{{decklist}}">{{name}} ({{id}})</a></td>
                         <td><a href="{{source_url}}">{{source_name}}</a></td>
-                        <td>{{archetype_name}}</td>
-                        <td>
-                            {{#suggestion}}<a href="{{url}}">{{name}} ({{id}})</a>{{/suggestion}}
-                        </td>
-                        <td>
-                            {{#suggestion}}<a href="{{archetype_url}}">{{archetype_name}} ({{archetype_id}})</a>{{/suggestion}}
-                            {{^suggestion}}No suggestion{{/suggestion}}
-                        </td>
+                        <td><a href="{{archetype_url}}">{{archetype_name}}</a></td>
+                        <td class="n">{{similarity}}</td>
+                        <td><a href="{{rule_archetype_url}}">{{rule_archetype_name}}</a></td>
                         <td>
                             <input type="hidden" name="deck_id" value="{{id}}">
                             {{> archetypedropdown}}
@@ -38,18 +35,71 @@
     </form>
 </section>
 <section>
-    <h2>Search By Card</h2>
+    <h2>Move</h2>
+    <form method="post">
+        <div>
+            <label>Move</label>
+            {{> archetypedropdown}}
+        </div>
+        <div>
+            <label>New Parent</label>
+            {{> archetypedropdown}}
+        </div>
+        <button type="submit">Move</button>
+    </form>
+</section>
+<section>
+    <h2>Rename</h2>
+    <form method="post">
+        <div>
+            <label for="archetype_id">Rename</label>
+            {{> archetypedropdown}}
+        </div>
+        <div>
+            <label for="rename_to">To</label>
+            <input type="text" name="rename_to" value="{{rename_to}}">
+        </div>
+        <button type="submit">Rename</button>
+    </form>
+</section>
+<section>
+    <h2>Update Description</h2>
+    <form method="post">
+        <div>
+            <label>Update</label>
+            {{> archetypedropdown}}
+        </div>
+        <div>
+            <label>New description</label>
+            <input type="text" name="new_description" value="">
+        </div>
+        <button type="submit">Update</button>
+    </form>
+</section>
+<section>
+    <h2>Search for Decks</h2>
 
     <form method="post">
         <div>
-            <label for="q">Cards (separated by newlines)</label>
-            <textarea name="q"></textarea>
+            <label for="q">With these cards (separated by newlines)</label>
+            <textarea name="q">{{query}}</textarea>
         </div>
-        <button type="submit">Search</button>
+        <div>
+            <label for="notq">Without these cards</label>
+            <textarea name="notq">{{notquery}}</textarea>
+        </div>
+        <button type="submit">Search by Card</button>
+    </form>
+
+    <form method="post">
+        <p>Use this tool to automatically find cases where identical decks have been assigned different archetypes.</p>
+        <input type="hidden" name="find_conflicts" value="true"></input>
+        <button type="submit" name="conflicts">Search for Conflicts</button>
     </form>
 
     {{#has_search_results}}
         <form method="post" class="inline">
+            {{> spinner}}
             <table>
                 <thead>
                     <tr>
@@ -81,26 +131,18 @@
     {{/has_search_results}}
 </section>
 <section>
-    <h2>Move</h2>
-    <form method="post" class="inline">
-        <p>Move</p>
-        {{> archetypedropdown}}
-        <p>New parent</p>
-        {{> archetypedropdown}}
-        <button type="submit">Move</button>
-    </form>
-</section>
-<section>
     <h2>Add Archetype</h2>
+    {{> spinner}}
     <table>
         {{#roots}}
             {{#archetype_tree}}
                 <tr class="archetype archetype-{{depth}}">
                     <td class="initial primary"><a href="{{url}}">{{name}}</a></td>
+                    <td class="archetype-description" title="{{description}}">{{description}}</td>
                     <td>
                         <form method="post" class="inline">
                             <input type="hidden" name="parent" value="{{id}}">
-                            <div class="field">
+                            <div>
                                 <input type="text" name="name">
                                 <button type="submit">Add</button>
                             </div>

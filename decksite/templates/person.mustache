@@ -1,19 +1,70 @@
-<h2>{{name}}</h2>
+{{> banner}}
 <section>
-    <h3>Decks</h3>
-    {{> decks}}
+    <h2>Decks</h2>
+    {{> decktable}}
 </section>
+{{> stats}}
+{{#num_achievements}}
+    <section>
+        <h2>Achievements</h2>
+        <ul class="buttons">
+            {{#displayed_achievements}}
+                <li title="{{detail}}">{{title}}</li>
+            {{/displayed_achievements}}
+        </ul>
+        <p><a href="{{person_achievements_url}}">Achievement Details…</a></p>
+        <p><a href="{{achievements_url}}">Everyone's Achievements…</a></p>
+    </section>
+{{/num_achievements}}
+{{#show_head_to_head}}
+    <section>
+        <h2>Head to Head</h2>
+        <table>
+            <thead>
+                <th>Opponent</th>
+                <th class="n" data-breakpoints="xs"># Matches</th>
+                <th class="n" data-sortInitialOrder="desc">Record</th>
+                <th class="n" data-breakpoints="xs"data-sortInitialOrder="desc">Win %</th>
+                {{! Empty column to hold the toggle when footable kicks in.}}
+                <td></td>
+            </thead>
+            <tbody>
+                {{#head_to_head}}
+                    <tr>
+                        <td><a href="{{opp_url}}">{{opp_mtgo_username}}</a></td>
+                        <td class="n">{{num_matches}}</td>
+                        <td class="n">{{> record}}</td>
+                        <td class="n">{{win_percent}}</td>
+                        {{! Empty column to hold the toggle when footable kicks in.}}
+                        <td></td>
+                    </tr>
+                {{/head_to_head}}
+            </tbody>
+        </table>
+        <p><a href="{{matches_url}}">Matches List…</a></p>
+    </section>
+{{/show_head_to_head}}
 <section>
-    <h3>Cards</h3>
+    <h2>Cards</h2>
     {{> cardstable}}
 </section>
-{{#has_only_played_cards}}
+{{#charts}}
     <section>
-        <h2>Unique Cards Played</h2>
-        <ul>
-            {{#only_played_cards}}
-                <li>{{> singlecard}}</li>
-            {{/only_played_cards}}
-        </ul>
+        <h2>{{title}}</h2>
+        <canvas class="chart" data-type="{{type}}" data-labels="{{labels}}" data-series="{{series}}" data-options="{{options}}"></canvas>
     </section>
-{{/has_only_played_cards}}
+{{/charts}}
+<section class="admin">
+    <h2>Notes</h2>
+    <div class="person-notes" data-person_id="{{person.id}}">
+        {{> spinner}}
+    </div>
+    <form method="post" action="{{add_note_url}}">
+        <input type="hidden" name="person_id" value="{{person.id}}">
+        <div>
+            <label for="note">Note</label>
+            <textarea name="note"></textarea>
+        </div>
+        <button type="submit">Add Note</button>
+    </form>
+</section>

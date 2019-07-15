@@ -1,19 +1,34 @@
-from magic import fetcher
+from typing import List
+
+from mypy_extensions import TypedDict
 
 from decksite.view import View
+from magic import fetcher
+
+ResourceDescription = TypedDict('ResourceDescription',
+                                {
+                                    'text': str,
+                                    'url': str,
+                                    'is_external': bool,
+                                })
+SectionDescription = TypedDict('SectionDescription',
+                               {
+                                   'title': str,
+                                   'items': List[ResourceDescription],
+                               })
 
 # pylint: disable=no-self-use
 class Resources(View):
-    def sections(self):
+    def sections(self) -> List[SectionDescription]:
         raw_resources = fetcher.resources()
-        sections = []
+        sections: List[SectionDescription] = []
         for title, raw_section in raw_resources.items():
-            section = {'title': title, 'items': []}
+            section: SectionDescription = {'title': title, 'items': []}
             sections.append(section)
             for text, url in raw_section.items():
-                item = {'text': text, 'url': url}
+                item: ResourceDescription = {'text': text, 'url': url, 'is_external': url.startswith('http') and '://pennydreadfulmagic.com/' not in url}
                 section['items'].append(item)
         return sections
 
-    def subtitle(self):
+    def page_title(self) -> str:
         return 'Resources'

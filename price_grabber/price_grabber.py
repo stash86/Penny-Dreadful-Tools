@@ -1,76 +1,80 @@
-import html
-import re
+import datetime
+import itertools
 import sys
-import time
-import urllib
+from typing import Dict, List, Optional
 
-from magic import card, database, fetcher_internal, oracle
-from shared import configuration
+import ftfy
+
+from magic import multiverse, oracle, rotation
+from price_grabber import parser, price
+from shared import configuration, dtutil, fetcher_internal
 from shared.database import get_database
-from shared.pd_exception import DatabaseException
+from shared.pd_exception import DatabaseException, TooFewItemsException
 
-from price_grabber import price
+DATABASE = get_database(configuration.get_str('prices_database'))
 
-DATABASE = get_database(configuration.get('prices_database'))
-CARDS = {}
+def run() -> None:
+    multiverse.init()
+    oracle.init()
+    fetch()
+    price.cache()
 
-def fetch():
-    all_prices = {}
-    url = 'https://www.mtggoldfish.com/prices/select'
-    s = fetcher_internal.fetch(url)
-    sets = parse_sets(s) + ['TD0', 'TD2'] # Theme decks pages not linked from /prices/select
-    for code in sets:
-        for suffix in ['', '_F']:
-            if code == 'PZ2' and suffix == '_F':
-                print('Explicitly skipping PZ2_F because it is a lie.')
-                continue
-            code = '{code}{suffix}'.format(code=code, suffix=suffix)
-            url = set_url(code)
-            time.sleep(1)
-            s = fetcher_internal.fetch(url, force=True)
-            prices = parse_prices(s)
-            if not prices:
-                print('Found no prices for {code}'.format(code=code))
-            all_prices[code] = prices
-    timestamp = int(time.time())
-    store(timestamp, all_prices)
+def fetch() -> None:
+    all_prices, timestamps = {}, []
+    ch_urls = configuration.get_list('cardhoarder_urls')
+    if ch_urls:
+        for _, url in enumerate(ch_urls):
+            s = fetcher_internal.fetch(url)
+            s = ftfy.fix_encoding(s)
+            timestamps.append(dtutil.parse_to_ts(s.split('\n', 1)[0].replace('UPDATED ', ''), '%Y-%m-%dT%H:%M:%S+00:00', dtutil.CARDHOARDER_TZ))
+            all_prices[url] = parser.parse_cardhoarder_prices(s)
+    url = configuration.get_str('mtgotraders_url')
+    if url:
+        s = fetcher_internal.fetch(url)
+        timestamps.append(dtutil.dt2ts(dtutil.now()))
+        all_prices['mtgotraders'] = parser.parse_mtgotraders_prices(s)
+    if not timestamps:
+        raise TooFewItemsException('Did not get any prices when fetching {urls} ({all_prices})'.format(urls=itertools.chain(configuration.get_list('cardhoarder_urls'), [configuration.get_str('mtgotraders_url')]), all_prices=all_prices))
+    count = store(min(timestamps), all_prices)
+    cleanup(count)
 
-def set_url(code):
-    return 'https://www.mtggoldfish.com/index/{code}#online'.format(code=urllib.parse.quote(code))
-
-def parse_sets(s):
-    # Exclude codes with underscores, dashes and lowercase because they are pages for standard, modern, etc. and will gives us dupes.
-    return re.findall("'/index/([A-Z0-9]+)'", s)
-
-def parse_prices(s):
-    results = re.findall(r"""<td class='card'><a.*?href="[^#]*#online".*?>([^\(<]*)(?:\(([^\)]*)\))?</a></td>\n<td>[^<]*</td>\n<td>[^<]*</td>\n<td class='text-right'>\n(.*)\n</td>""", s)
-    return [(name_lookup(html.unescape(name.strip())), html.unescape(version.strip()), html.unescape(price.strip())) for name, version, price in results]
-
-def store(timestamp, all_prices):
-    DATABASE.begin()
-    lows = {}
-    sql = 'INSERT INTO price (`time`, name, `set`, version, premium, price) VALUES (?, ?, ?, ?, ?, ?)'
+def store(timestamp: float, all_prices: Dict[str, parser.PriceListType]) -> int:
+    DATABASE.begin('store')
+    lows: Dict[str, int] = {}
     for code in all_prices:
         prices = all_prices[code]
-        try:
-            code, premium = code.split('_')
-            premium = True
-        except ValueError:
-            premium = False
-        for name, version, p in prices:
+        for name, p, _ in prices:
             cents = int(float(p) * 100)
-            execute(sql, [timestamp, name, code, version, premium, cents])
             if cents < lows.get(name, sys.maxsize):
                 lows[name] = cents
-    sql = 'INSERT INTO low_price (`time`, name, price) VALUES '
-    sql += ", ".join(['(?, ?, ?)'] * len(lows))
-    values = []
-    for name, cents in lows.items():
-        values.extend([timestamp, name, cents])
-    execute(sql, values)
-    DATABASE.commit()
+    count = 0
+    while lows:
+        count = count + 1
+        sql = 'INSERT INTO low_price (`time`, name, price) VALUES '
+        chunk = []
+        try:
+            for _ in range(0, 20): # type: ignore
+                chunk.append(lows.popitem())
+        except KeyError:
+            pass # Emptied it
+        sql += ', '.join(['(%s, %s, %s)'] * len(chunk))
+        values = []
+        for name, cents in chunk:
+            values.extend([timestamp, name, cents])
+        execute(sql, values)
+    DATABASE.commit('store')
+    return count * 20
 
-def execute(sql, values=None):
+def cleanup(count: int = 0) -> None:
+    beginning_of_season = rotation.last_rotation()
+    one_month_ago = dtutil.now(dtutil.WOTC_TZ) - datetime.timedelta(31)
+    oldest_needed = min(beginning_of_season, one_month_ago)
+    limit = ''
+    if count > 0:
+        limit = f'LIMIT {count * 2}'
+    execute('DELETE FROM low_price WHERE `time` < %s ' + limit, [dtutil.dt2ts(oldest_needed)])
+
+def execute(sql: str, values: Optional[List[object]] = None) -> None:
     if values is None:
         values = []
     try:
@@ -81,18 +85,8 @@ def execute(sql, values=None):
         create_tables()
         execute(sql, values)
 
-def create_tables():
+def create_tables() -> None:
     print('Creating price tables.')
-    sql = """CREATE TABLE IF NOT EXISTS price (
-        `time` INTEGER,
-        name VARCHAR(150),
-        `set` VARCHAR(10),
-        version VARCHAR(30),
-        premium BOOLEAN,
-        price MEDIUMINT UNSIGNED,
-        INDEX idx_time (`time`)
-    )"""
-    execute(sql)
     sql = """CREATE TABLE IF NOT EXISTS cache (
         `time` INTEGER,
         name VARCHAR(150),
@@ -101,7 +95,8 @@ def create_tables():
         price MEDIUMINT UNSIGNED,
         week FLOAT,
         month FLOAT,
-        season FLOAT
+        season FLOAT,
+        INDEX idx_name_price (price)
     )"""
     execute(sql)
     sql = """CREATE TABLE IF NOT EXISTS low_price (
@@ -111,18 +106,3 @@ def create_tables():
         INDEX idx_name_time_price (name, `time`, price)
     )"""
     execute(sql)
-
-def name_lookup(name):
-    if not CARDS:
-        rs = database.DATABASE.execute(oracle.base_query())
-        for row in rs:
-            CARDS[card.canonicalize(row['name'])] = row['name']
-    canonical = card.canonicalize(name)
-    if canonical not in CARDS:
-        print("Bogus name {name} ({canonical}) found.".format(name=name, canonical=canonical))
-        return name
-    return CARDS[canonical]
-
-if __name__ == "__main__":
-    fetch()
-    price.cache()
