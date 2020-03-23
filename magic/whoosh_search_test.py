@@ -1,7 +1,6 @@
 import unittest
 from typing import List
 
-import pytest
 import whoosh
 
 from magic import multiverse
@@ -11,12 +10,12 @@ from magic.whoosh_search import WhooshSearcher
 # pylint: disable=unused-variable
 class WhooshSearchTest(unittest.TestCase):
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         try:
-            cls.searcher = WhooshSearcher()
+            cls.searcher = WhooshSearcher() # type: ignore
         except whoosh.index.EmptyIndexError: # Whoosh hasn't been initialized yet!
             multiverse.reindex()
-            cls.searcher = WhooshSearcher()
+            cls.searcher = WhooshSearcher() # type: ignore
 
 
     def best_match_is(self, query: str, expected_best_match: str, *additional_matches: str) -> None:
@@ -33,9 +32,9 @@ class WhooshSearchTest(unittest.TestCase):
         assert len(cards) >= 1
         assert is_included(card_name, cards)
 
-    def aliases_are_exact(self):
+    def aliases_are_exact(self) -> None:
         for q, card in (('bob', 'Dark Confidant'), ('jens', 'Solemn Simulacrum'), ('sad robot', 'Solemn Simulacrum'), ('mom', 'Mother of Runes'), ('tim', 'Prodigal Sorcerer'), ('gary', 'Gray Merchant of Asphodel'), ('finkel', 'Shadowmage Infiltrator'), ('kai', 'Voidmage Prodigy'), ('tiago', 'Snapcaster Mage'), ('pikula', 'Meddling Mage'), ('durdle turtle', 'Meandering Towershell'), ('volvary', 'Aura Barbs'), ('bolt', 'Lightning Bolt'), ('ftk', 'Flametongue Kavu'), ('fow', 'Force of Will'), ('looter scooter', "Smuggler's Copter"), ('nerd ape', "Inventor's Apprentice")):
-            result = self.searcher.search(q)
+            result = self.searcher.search(q) # type: ignore
             assert result.get_best_match() == card
 
     def test_assorted_typos(self) -> None:
@@ -61,7 +60,7 @@ class WhooshSearchTest(unittest.TestCase):
     def test_2_typos_in_2_words(self) -> None:
         self.finds_at_least('Womds of Rogh', 'Winds of Rath')
 
-    def best_match_without_prefix(self):
+    def best_match_without_prefix(self) -> None:
         self.best_match_is('Winds of Wrath', 'Winds of Rath')
         self.best_match_is('etherling', 'Aetherling')
 
@@ -93,7 +92,6 @@ class WhooshSearchTest(unittest.TestCase):
     def test_flip(self) -> None:
         self.best_match_is('Dokai, Weaver of Life', 'Budoka Gardener')
 
-    @pytest.mark.xfail(reason='Switch to Scryfall data not quite complete.')
     def test_meld(self) -> None:
         self.best_match_is('Graf Rats', 'Graf Rats')
         self.best_match_is('Midnight Scavengers', 'Midnight Scavengers')

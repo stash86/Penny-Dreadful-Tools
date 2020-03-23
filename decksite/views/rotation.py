@@ -27,6 +27,7 @@ class Rotation(View):
             self.rotation_msg = 'Supplemental rotation is ' + dtutil.display_date(rotation.next_supplemental(), 2)
         if in_rotation:
             self.in_rotation = in_rotation
+            self.show_interestingness_filter = True
             self.runs, self.runs_percent, self.cards = rotation.read_rotation_files()
             # Now add interestingness to the cards, which only decksite knows not magic.rotation.
             playability = card.playability()
@@ -47,6 +48,7 @@ class Rotation(View):
             c.hits_needed = redact(c.hits_needed)
             c.percent = redact(c.percent)
             c.percent_needed = redact(c.percent_needed)
+        self.show_filters_toggle = True
 
     def page_title(self) -> str:
         return 'Rotation'

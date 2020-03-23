@@ -38,7 +38,7 @@ TESTDATA = [
     ('.ur control', 'Izzet Control', ['U', 'R'], None),
     ('mono g aggro', 'Mono Green Aggro', ['G'], 'Aggro'),
     ('monog ramp', 'Mono Green Ramp', ['G'], 'Aggro'),
-    ('Monogreen Creatures', 'Mono Green Creatures', ['G', 'W'], None),
+    ('Monogreen Creatures', 'Green Creatures', ['G', 'W'], None),
     ('S6 red Deck Wins', 'Red Deck Wins', ['R'], None),
     ('S6red Deck Wins', 'Red Deck Wins', ['R'], None),
     ('Mono-W Soldiers', 'Mono White Soldiers', ['W'], None),
@@ -50,7 +50,7 @@ TESTDATA = [
     ('Rise like a golgari', 'Rise Like a Golgari', ['W', 'U', 'B', 'R', 'G'], None),
     ('BIG RED', 'Big Red', None, None),
     ('big Green', 'Big Green', None, None),
-    ('Black Power', 'Mono Black Power', ['U', 'B'], None),
+    ('Black Power', 'Black Power', ['U', 'B'], None),
     ('PD', 'Mono Green', ['G'], None),
     ('PD', 'Azorius Control', ['U', 'W'], 'Control'),
     ('PD', 'Azorius', ['U', 'W'], 'Unclassified'),
@@ -77,10 +77,20 @@ TESTDATA = [
     ('PD10 Killer', 'Killer', ['R'], 'Red Deck Wins'),
     ('PD-10 Killer', 'Killer', ['R'], 'Red Deck Wins'),
     ('PD-10 Killer', 'Killer', ['R'], 'Red Deck Wins'),
-    ('Deck - Mono Black Aristocrats (1)', 'Mono Black Aristocrats (1)', '[B]', 'Mono Black Aristocrats'),
+    ('Deck - Mono Black Aristocrats (1)', 'Mono Black Aristocrats (1)', ['B'], 'Mono Black Aristocrats'),
     ('PD-GB', 'Golgari the Rock', ['G', 'B'], 'The Rock'),
     ('PD 11 WW', 'White Weenie', ['W'], None),
-    ('Bad Esper 2.0', 'Bad Esper 2.0', ['W', 'U', 'B'], 'Esper Control')
+    ('Bad Esper 2.0', 'Bad Esper 2.0', ['W', 'U', 'B'], 'Esper Control'),
+    ('BBB', 'Mono Black', ['B'], 'Zombies'),
+    ('Manaless Dredge', 'Manaless Dredge', ['B'], 'Graveyard Value'),
+    ('Deep Anal', 'Deep', ['U'], 'Control'),
+    ('Supremacia Ariana', 'Mono White', ['W'], None),
+    ('Blue Bois', 'Blue Bois', ['U', 'B'], None),
+    ('Analog Drake', 'Analog Drake', ['U', 'W'], 'Peregrine Drake'),
+    ('R Deck Wins', 'Red Deck Wins', ['R'], 'Red Deck Wins'),
+    ('HAND　DEATH', 'Hand Death', ['B'], 'Mono Black Midrange'),
+    ('(Penny) Boros Soldiers', 'Boros Soldiers', ['W', 'R'], 'Soldiers'),
+    ('Red Deck Wins byvci', 'Red Deck Wins Byvci', ['R'], 'Red Deck Wins')
 ]
 
 @pytest.mark.parametrize('original_name,expected,colors,archetype_name', TESTDATA)
@@ -94,6 +104,7 @@ def test_remove_pd() -> None:
     assert deck_name.remove_pd('Penny Dreadful Knights') == 'Knights'
     assert deck_name.remove_pd('biovisionary pd') == 'biovisionary'
     assert deck_name.remove_pd('[PD] Mono Black Control') == 'Mono Black Control'
+    assert deck_name.remove_pd('(Penny) Boros Soliders') == 'Boros Soliders'
 
 def test_invalid_color() -> None:
     d = Container({'original_name': 'PD',
@@ -106,6 +117,6 @@ def test_invalid_color() -> None:
         assert True
 
 def test_canonicalize_colors() -> None:
-    assert deck_name.canonicalize_colors([]) == []
-    assert deck_name.canonicalize_colors(['White', 'Black', 'Orzhov', 'Abzan']) == ['B', 'G', 'W']
-    assert deck_name.canonicalize_colors(['White', 'White', 'White']) == ['W']
+    assert deck_name.canonicalize_colors([]) == set()
+    assert deck_name.canonicalize_colors(['White', 'Black', 'Orzhov', 'Abzan']) == {'B', 'G', 'W'}
+    assert deck_name.canonicalize_colors(['White', 'White', 'White']) == {'W'}

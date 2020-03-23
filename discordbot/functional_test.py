@@ -1,73 +1,97 @@
 import asyncio
-import types
-from typing import Any
+from typing import Any, Dict, List, Tuple, cast
 
 import discord
 import pytest
 
-from discordbot import command
-from shared import fetcher_internal
+from discordbot.bot import Bot
+from discordbot.command import MtgContext
+from discordbot.commands import Card, CardConverter
+from shared.container import Container
 
 
-# Mock up assertions within the discord client.
-# I love that Python lets us just ruin 3rd-party libraries like this.
-def generate_fakebot() -> discord.Client:
-    async def fake_send_message(channel, text):
-        print('Responding with "{0}"'.format(text))
-        channel.calls += 1
-        assert channel is not None
-        assert text is not None and text != ''
-    async def fake_send_file(channel, image_file, content=None):
-        print('Uploading "{0}", with additional text "{1}"'.format(image_file, content))
-        channel.calls += 1
-        assert channel is not None
-        assert image_file is not None and fetcher_internal.acceptable_file(image_file)
-        assert content != ''
-    async def fake_send_typing(channel):
-        assert channel is not None
-    fakebot = discord.Client()
-    fakebot.send_message = fake_send_message
-    fakebot.send_file = fake_send_file
-    fakebot.send_typing = fake_send_typing
-    return fakebot
+@pytest.fixture(scope='module')
+def discordbot() -> Bot:
+    bot = Bot()
+    bot.init()
+    return bot
 
-def generate_fakechannel() -> Any:
-    fakechannel = types.new_class('Channel')
-    fakechannel.is_private = True # type: ignore
-    fakechannel.calls = 0 # type: ignore
-    fakechannel.id = 0 # type: ignore
-    return fakechannel
+class TestContext(MtgContext):
+    def __init__(self, **attrs: Any) -> None:  # pylint: disable=super-init-not-called
+        self.sent = False
+        self.sent_args = False
+        self.sent_file = False
 
-@pytest.mark.functional
-@pytest.mark.xfail(reason='API changes.  Needs full rewrite')
-def test_commands() -> None:
-    fakebot = generate_fakebot()
+    async def send(self, *args: Any, **kwargs: Any) -> None: # pylint: disable=arguments-differ
+        self.sent = True
+        self.sent_args = bool(args)
+        self.sent_file = 'file' in kwargs.keys()
 
-    loop = asyncio.get_event_loop()
-    for cmd in dir(command.Commands):
-        if cmd.startswith('_'):
-            continue
-        if cmd in ['restartbot', 'updateprices', 'clearimagecache', 'bug', 'gbug']:
-            continue
+    def typing(self) -> 'TestContext':
+        return self
 
-        channel = generate_fakechannel()
-        calls = channel.calls # type: ignore
+    def __enter__(self) -> None:
+        pass
 
-        message = types.new_class('Message')
-        message.content = '!{0} args'.format(cmd) # type: ignore
-        message.channel = channel # type: ignore
+    async def __aenter__(self) -> 'TestContext':
+        return self
 
-        if cmd == 'time':
-            message.content = '!time Melbourne' # type: ignore
+    def __exit__(self, exc_type, exc, tb):  # type: ignore
+        pass
 
-        message.author = types.new_class('User') # type: ignore
-        message.author.mention = '@nobody' # type: ignore
-        message.author.voice = types.new_class('VoiceState') # type: ignore
-        message.author.voice.voice_channel = None # type: ignore
+    async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore
+        pass
 
-        print('Calling {0}'.format(message.content)) # type: ignore
-        loop.run_until_complete(command.handle_command(message, fakebot))
-        assert channel.calls > calls # type: ignore
-        calls = channel.calls # type: ignore
+async def card(param: str) -> Card:
+    ctx = TestContext()
+    return await cast(Card, CardConverter.convert(ctx, param))
 
-    loop.close()
+
+def get_params() -> List[Tuple]:
+    async def params() -> List[Tuple]:
+        return [
+            ('art', {'c': await card('Island')}),
+            ('barbs', {}),
+            ('echo', {'args': 'test string!'}),
+            ('explain', {'thing': None}),
+            ('explain', {'thing': 'bugs'}),
+            ('flavor', {'c': await card('Island')}), # No flavor
+            ('flavor', {'c': await card('Horned Turtle')}),  # Tasty Flavor
+            ('flavor', {'c': await card('Gruesome Menagerie|RNA')}),  # Spicy Flavor
+            ('history', {'c': await card('Necropotence')}),
+            ('legal', {'c': await card('Island')}),
+            ('legal', {'c': await card('Black Lotus')}),
+            ('oracle', {'c': await card('Dark Ritual')}),
+            pytest.param('p1p1', {}, marks=pytest.mark.functional),
+            ('patreon', {}),
+            ('price', {'c': await card('Gleemox')}),
+            ('rotation', {}),
+            pytest.param('rhinos', {}, marks=pytest.mark.functional),
+            ('rulings', {'c': await card('Worldknit')}),
+            ('search', {'args': 'f:pd'}),
+            ('status', {}),
+            ('time', {'args': 'AEST'}),
+            ('tournament', {}),
+            ('version', {}),
+            ('whois', {'args': 'silasary'}),
+            ('whois', {'args': 'kaet'}),
+            ('whois', {'args': '<@154363842451734528>'}),
+            ('whois', {'args': '<@!224755717767299072>'})
+        ]
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(params())
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cmd, kwargs', get_params())
+async def test_command(discordbot: Bot, cmd: str, kwargs: Dict[str, Any]) -> None: # pylint: disable=redefined-outer-name
+    command: discord.ext.commands.Command = discordbot.all_commands[cmd]
+    ctx = TestContext()
+    ctx.bot = discordbot
+    ctx.message = Container()
+    ctx.message.channel = Container({'id': '1'})
+    ctx.message.channel.typing = ctx.typing
+    ctx.message.channel.send = ctx.send
+    ctx.author = Container()
+    ctx.author.mention = '<@111111111111>'
+    await command.callback(ctx, **kwargs)
+    assert ctx.sent

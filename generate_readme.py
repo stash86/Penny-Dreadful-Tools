@@ -1,4 +1,5 @@
 import subprocess
+import sys
 
 from discordbot import generate_readme as bot_readme
 
@@ -56,4 +57,5 @@ def git_commit() -> None:
     subprocess.call(['git', 'commit', '-m', 'Updated README.md'])
     subprocess.call(['git', 'push'])
 
-exit(generate_readme())
+if __name__ == '__main__':
+    sys.exit(generate_readme())

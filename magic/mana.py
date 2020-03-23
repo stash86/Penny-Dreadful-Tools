@@ -10,7 +10,7 @@ COLOR = '[WURBGCS]'
 X = '[XYZ]'
 SLASH = '/'
 MODIFIER = 'P'
-HALF = '[wh]'
+HALF = 'H'
 
 def parse(s: str) -> List[str]:
     tmp = ''
@@ -25,10 +25,13 @@ def parse(s: str) -> List[str]:
             elif re.match(COLOR, c):
                 tmp += c
                 mode = COLOR
-            elif re.match(X, c) or re.match(HALF, c):
+            elif re.match(X, c):
                 tokens.append(c)
                 tmp = ''
                 mode = START
+            elif re.match(HALF, c):
+                tmp += c
+                mode = HALF
             else:
                 raise InvalidManaCostException('Symbol must start with {digit} or {color}, `{c}` found in `{s}`.'.format(digit=DIGIT, color=COLOR, c=c, s=s))
         elif mode == DIGIT:
@@ -60,6 +63,13 @@ def parse(s: str) -> List[str]:
                 mode = START
             else:
                 raise InvalidManaCostException('Slash must be followed by {color} or {modifier}, `{c}` found in `{s}`.'.format(color=COLOR, modifier=MODIFIER, c=c, s=s))
+        elif mode == HALF:
+            if re.match(COLOR, c):
+                tokens.append(tmp + c)
+                tmp = ''
+                mode = START
+            else:
+                raise InvalidManaCostException('H must be followed by {color}, `{c}` found in `{s}`.'.format(color=COLOR, c=c, s=s))
     if tmp:
         tokens.append(tmp)
     return tokens
@@ -124,7 +134,7 @@ def twobrid(symbol: str) -> bool:
     return bool(re.match('^2/{color}$'.format(color=COLOR), symbol))
 
 def half(symbol: str) -> bool:
-    return bool(re.match('^{half}$'.format(half=HALF), symbol))
+    return bool(re.match('^{half}{color}$'.format(half=HALF, color=COLOR), symbol))
 
 def colored(symbol: str) -> bool:
     return bool(re.match('^{color}$'.format(color=COLOR), symbol))
@@ -137,7 +147,7 @@ def order(symbols: Iterable[str]) -> List[str]:
     return list(sorted(permutations, key=order_score)[0])
 
 def order_score(initial_symbols: Tuple[str, ...]) -> int:
-    symbols = [symbol for symbol in initial_symbols if symbol != 'C']
+    symbols = [symbol for symbol in initial_symbols if symbol not in ('C', 'S')]
     if not symbols:
         return 0
     score = 0

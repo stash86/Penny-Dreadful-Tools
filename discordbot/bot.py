@@ -1,41 +1,59 @@
 import asyncio
 import datetime
 import re
+import subprocess
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import discord
 from discord import Guild, Member, Role, VoiceState
 from discord.activity import Streaming
 from discord.errors import Forbidden, NotFound
+from discord.ext import commands
 from discord.message import Message
 from discord.reaction import Reaction
 from discord.state import Status
 from github.GithubException import GithubException
 
+import discordbot.commands
 from discordbot import command
 from magic import fetcher, multiverse, oracle, rotation, tournaments
 from magic.card_description import CardDescription
 from magic.models import Card
-from shared import configuration, dtutil
-from shared import fetcher_internal as internal
-from shared import perf, redis, repo
+from shared import configuration, dtutil, fetch_tools, perf, redis, repo
 from shared.container import Container
 from shared.pd_exception import InvalidDataException
 
+TASKS = []
 
-class Bot(discord.Client):
-    def __init__(self) -> None:
+def background_task(func: Callable) -> Callable:
+    async def wrapper(self: discord.Client) -> None:
+        try:
+            await self.wait_until_ready()
+            await func(self)
+        except Exception: # pylint: disable=broad-except
+            await self.on_error(func.__name__)
+    TASKS.append(wrapper)
+    return wrapper
+
+
+class Bot(commands.Bot):
+    def __init__(self, **kwargs: Any) -> None:
         self.launch_time = perf.start()
-        super().__init__()
+        commit_id = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode()
+        redis.store('discordbot:commit_id', commit_id)
+
+        super().__init__(command_prefix=commands.when_mentioned_or('!'), help_command=commands.DefaultHelpCommand(dm_help=True), case_insensitive=True, **kwargs)
         self.voice = None
         self.achievement_cache: Dict[str, Dict[str, str]] = {}
+        for task in TASKS:
+            asyncio.ensure_future(task(self), loop=self.loop)
 
     def init(self) -> None:
         multiverse.init()
         multiverse.update_bugged_cards()
         oracle.init()
-        self.run(configuration.get('token'))
+        discordbot.commands.setup(self)
 
     async def on_ready(self) -> None:
         print('Logged in as {username} ({id})'.format(username=self.user.name, id=self.user.id))
@@ -153,7 +171,8 @@ class Bot(discord.Client):
                     if search:
                         previous_command, suggestions = search.group(1, 2)
                         card = re.findall(r':[^:]*?: ([^:]*) ', suggestions + ' ')[command.DISAMBIGUATION_NUMBERS_BY_EMOJI[reaction.emoji]-1]
-                        message = Container(content='!{c} {a}'.format(c=previous_command, a=card), channel=reaction.message.channel, author=author, reactions=[])
+                        # pylint: disable=protected-access
+                        message = Container(content='!{c} {a}'.format(c=previous_command, a=card), channel=reaction.message.channel, author=author, reactions=[], _state=reaction.message._state)
                         await self.on_message(message)
                         await reaction.message.delete()
 
@@ -166,162 +185,163 @@ class Bot(discord.Client):
         except GithubException as e:
             print('Github error', e, file=sys.stderr)
 
+    @background_task
     async def background_task_spoiler_season(self) -> None:
         'Poll Scryfall for the latest 250 cards, and add them to our db if missing'
-        try:
-            await self.wait_until_ready()
-            latest_cards = await fetcher.scryfall_cards_async()
-            cards_not_currently_in_db: List[CardDescription] = []
-            for c in latest_cards['data']:
-                try:
-                    oracle.valid_name(c['name'])
-                except InvalidDataException:
-                    print(f"Planning to add {c['name']} to database in background_task_spoiler_season.")
-                    cards_not_currently_in_db.append(c)
-            if len(cards_not_currently_in_db) > 0:
-                oracle.add_cards_and_update(cards_not_currently_in_db)
-        except Exception: # pylint: disable=broad-except
-            await self.on_error('background_task_spoiler_season')
+        latest_cards = await fetcher.scryfall_cards_async()
+        cards_not_currently_in_db: List[CardDescription] = []
+        for c in latest_cards['data']:
+            if not multiverse.valid_layout(c):
+                continue
+            name = multiverse.name_from_card_description(c)
+            try:
+                oracle.valid_name(name)
+            except InvalidDataException:
+                print(f'Planning to add {name} to database in background_task_spoiler_season.')
+                cards_not_currently_in_db.append(c)
+        if len(cards_not_currently_in_db) > 0:
+            oracle.add_cards_and_update(cards_not_currently_in_db)
 
+    @background_task
     async def background_task_tournaments(self) -> None:
-        try:
-            await self.wait_until_ready()
-            tournament_channel_id = configuration.get_int('tournament_reminders_channel_id')
-            if not tournament_channel_id:
-                print('tournament channel is not configured')
-                return
-            channel = self.get_channel(tournament_channel_id)
-            if channel is None:
-                print(f'ERROR: could not find tournament_channel_id {tournament_channel_id}')
-                return
-            while self.is_ready:
-                info = tournaments.next_tournament_info()
-                diff = info['next_tournament_time_precise']
-                if info['sponsor_name']:
-                    message = 'A {sponsor} sponsored tournament'.format(sponsor=info['sponsor_name'])
-                else:
-                    message = 'A free tournament'
-                embed = discord.Embed(title=info['next_tournament_name'], description=message)
-                if diff <= 1:
-                    embed.add_field(name='Starting now', value='Check <#334220558159970304> for further annoucements')
-                elif diff <= 14400:
-                    embed.add_field(name='Starting in:', value=dtutil.display_time(diff, 2))
-                    embed.add_field(name='Pre-register now:', value='https://gatherling.com')
+        tournament_channel_id = configuration.get_int('tournament_reminders_channel_id')
+        if not tournament_channel_id:
+            print('tournament channel is not configured')
+            return
+        channel = self.get_channel(tournament_channel_id)
+        if channel is None:
+            print(f'ERROR: could not find tournament_channel_id {tournament_channel_id}')
+            return
+        while self.is_ready:
+            info = tournaments.next_tournament_info()
+            diff = info['next_tournament_time_precise']
+            if info['sponsor_name']:
+                message = 'A {sponsor} sponsored tournament'.format(sponsor=info['sponsor_name'])
+            else:
+                message = 'A free tournament'
+            embed = discord.Embed(title=info['next_tournament_name'], description=message)
+            if diff <= 1:
+                embed.add_field(name='Starting now', value='Check <#334220558159970304> for further annoucements')
+            elif diff <= 14400:
+                embed.add_field(name='Starting in:', value=dtutil.display_time(diff, 2))
+                embed.add_field(name='Pre-register now:', value='https://gatherling.com')
 
-                if diff <= 14400:
-                    embed.set_image(url=fetcher.decksite_url('/favicon-152.png'))
-                    # See #2809.
-                    # pylint: disable=no-value-for-parameter,unexpected-keyword-arg
-                    await channel.send(embed=embed)
+            if diff <= 14400:
+                embed.set_image(url=fetcher.decksite_url('/favicon-152.png'))
+                # See #2809.
+                # pylint: disable=no-value-for-parameter,unexpected-keyword-arg
+                await channel.send(embed=embed)
 
-                if diff <= 300:
-                    # Five minutes, final warning.  Sleep until the tournament has started.
-                    timer = 301
-                elif diff <= 1800:
-                    # Half an hour. Sleep until 5 minute warning.
-                    timer = diff - 300
-                elif diff <= 3600:
-                    # One hour.  Sleep until half-hour warning.
-                    timer = diff - 1800
-                else:
-                    # Sleep for one hour plus enough to have a whole number of hours left.
-                    timer = 3600 + diff % 3600
-                    if diff > 3600 * 6:
-                        # The timer can afford to get off-balance by doing other background work.
-                        await self.background_task_spoiler_season()
-                        multiverse.update_bugged_cards()
+            if diff <= 300:
+                # Five minutes, final warning.  Sleep until the tournament has started.
+                timer = 301
+            elif diff <= 1800:
+                # Half an hour. Sleep until 5 minute warning.
+                timer = diff - 300
+            elif diff <= 3600:
+                # One hour.  Sleep until half-hour warning.
+                timer = diff - 1800
+            else:
+                # Sleep for one hour plus enough to have a whole number of hours left.
+                timer = 3600 + diff % 3600
+                if diff > 3600 * 6:
+                    # The timer can afford to get off-balance by doing other background work.
+                    await self.background_task_spoiler_season()
+                    multiverse.update_bugged_cards()
 
-                if timer < 300:
-                    timer = 300
-                print('diff={0}, timer={1}'.format(diff, timer))
-                await asyncio.sleep(timer)
-            print('naturally stopping tournament reminders')
-        except Exception: # pylint: disable=broad-except
-            await self.on_error('background_task_tournaments')
+            if timer < 300:
+                timer = 300
+            print('diff={0}, timer={1}'.format(diff, timer))
+            await asyncio.sleep(timer)
+        print('naturally stopping tournament reminders')
 
+    @background_task
     async def background_task_league_end(self) -> None:
-        try:
-            await self.wait_until_ready()
-            tournament_channel_id = configuration.get_int('tournament_reminders_channel_id')
-            if not tournament_channel_id:
-                print('tournament channel is not configured')
-                return
-            channel = self.get_channel(tournament_channel_id)
-            while self.is_ready:
-                try:
-                    league = await internal.fetch_json_async(fetcher.decksite_url('/api/league'))
-                except internal.FetchException as e:
-                    print("Couldn't reach decksite or decode league json with error message(s) {0}".format(
-                        '; '.join(str(x) for x in e.args)
-                        ))
-                    print('Sleeping for 5 minutes and trying again.')
-                    await asyncio.sleep(300)
-                    continue
+        tournament_channel_id = configuration.get_int('tournament_reminders_channel_id')
+        if not tournament_channel_id:
+            print('tournament channel is not configured')
+            return
+        channel = self.get_channel(tournament_channel_id)
+        while self.is_ready:
+            try:
+                league = await fetch_tools.fetch_json_async(fetcher.decksite_url('/api/league'))
+            except fetch_tools.FetchException as e:
+                print("Couldn't reach decksite or decode league json with error message(s) {0}".format(
+                    '; '.join(str(x) for x in e.args)
+                    ))
+                print('Sleeping for 5 minutes and trying again.')
+                await asyncio.sleep(300)
+                continue
 
-                if not league:
-                    await asyncio.sleep(300)
-                    continue
+            if not league:
+                await asyncio.sleep(300)
+                continue
 
-                diff = round((datetime.datetime.fromtimestamp(league['end_date'], tz=datetime.timezone.utc)
-                              - datetime.datetime.now(tz=datetime.timezone.utc))
-                             / datetime.timedelta(seconds=1))
+            diff = round((datetime.datetime.fromtimestamp(league['end_date'], tz=datetime.timezone.utc)
+                          - datetime.datetime.now(tz=datetime.timezone.utc))
+                         / datetime.timedelta(seconds=1))
 
-                embed = discord.Embed(title=league['name'], description='League ending soon - any active runs will be cut short.')
-                if diff <= 60 * 60 * 24:
-                    embed.add_field(name='Ending in:', value=dtutil.display_time(diff, 2))
-                    embed.set_image(url=fetcher.decksite_url('/favicon-152.png'))
-                    # See #2809.
-                    # pylint: disable=no-value-for-parameter,unexpected-keyword-arg
-                    await channel.send(embed=embed)
-                if diff <= 5 * 60:
-                    # Five minutes, final warning.
-                    timer = 301
-                elif diff <= 1 * 60 * 60:
-                    # 1 hour. Sleep until five minute warning.
-                    timer = diff - 300
-                elif diff <= 24 * 60 * 60:
-                    # 1 day.  Sleep until one hour warning.
-                    timer = diff - 1800
-                else:
-                    # Sleep for 1 day, plus enough to leave us with a whole number of days
-                    timer = 24 * 60 * 60 + diff % (24 * 60 * 60)
+            embed = discord.Embed(title=league['name'], description='League ending soon - any active runs will be cut short.')
+            if diff <= 60 * 60 * 24:
+                embed.add_field(name='Ending in:', value=dtutil.display_time(diff, 2))
+                embed.set_image(url=fetcher.decksite_url('/favicon-152.png'))
+                # See #2809.
+                # pylint: disable=no-value-for-parameter,unexpected-keyword-arg
+                await channel.send(embed=embed)
+            if diff <= 5 * 60:
+                # Five minutes, final warning.
+                timer = 301
+            elif diff <= 1 * 60 * 60:
+                # 1 hour. Sleep until five minute warning.
+                timer = diff - 300
+            elif diff <= 24 * 60 * 60:
+                # 1 day.  Sleep until one hour warning.
+                timer = diff - 1800
+            else:
+                # Sleep for 1 day, plus enough to leave us with a whole number of days
+                timer = 24 * 60 * 60 + diff % (24 * 60 * 60)
 
-                if timer < 300:
-                    timer = 300
-                print('diff={0}, timer={1}'.format(diff, timer))
-                await asyncio.sleep(timer)
-            print('naturally stopping league reminders')
-        except Exception: # pylint: disable=broad-except
-            await self.on_error('background_task_league_end')
+            if timer < 300:
+                timer = 300
+            print('diff={0}, timer={1}'.format(diff, timer))
+            await asyncio.sleep(timer)
+        print('naturally stopping league reminders')
 
+    @background_task
     async def background_task_rotation_hype(self) -> None:
-        try:
-            await self.wait_until_ready()
-            rotation_hype_channel_id = configuration.get_int('rotation_hype_channel_id')
-            if not rotation_hype_channel_id:
-                print('rotation hype channel is not configured')
-                return
-            channel = self.get_channel(rotation_hype_channel_id)
-            while self.is_ready():
-                until_rotation = rotation.next_rotation_any_kind() - dtutil.now()
-                last_run_time = rotation.last_run_time()
-                if until_rotation < datetime.timedelta(7) and last_run_time is not None:
-                    if dtutil.now() - last_run_time < datetime.timedelta(minutes=5):
-                        await channel.send(rotation_hype_message())
-                    timer = 5 * 60
-                else:
-                    timer = int((until_rotation - datetime.timedelta(7)).total_seconds())
-                await asyncio.sleep(timer)
-        except Exception: # pylint: disable=broad-except
-            await self.on_error('background_task_rotation_hype')
+        rotation_hype_channel_id = configuration.get_int('rotation_hype_channel_id')
+        if not rotation_hype_channel_id:
+            print('rotation hype channel is not configured')
+            return
+        channel = self.get_channel(rotation_hype_channel_id)
+        while self.is_ready():
+            until_rotation = rotation.next_rotation_any_kind() - dtutil.now()
+            last_run_time = rotation.last_run_time()
+            if until_rotation < datetime.timedelta(7) and last_run_time is not None:
+                if dtutil.now() - last_run_time < datetime.timedelta(minutes=5):
+                    hype = await rotation_hype_message()
+                    if hype:
+                        await channel.send(hype)
+                timer = 5 * 60
+            else:
+                timer = int((until_rotation - datetime.timedelta(7)).total_seconds())
+            await asyncio.sleep(timer)
+
+    @background_task
+    async def background_task_reboot(self) -> None:
+        do_reboot_key = 'discordbot:do_reboot'
+        if redis.get_bool(do_reboot_key):
+            redis.clear(do_reboot_key)
+        while self.is_ready():
+            if redis.get_bool(do_reboot_key):
+                print('Got request to reboot from redis')
+                await self.logout()
+            await asyncio.sleep(60)
 
 def init() -> None:
     client = Bot()
-    asyncio.ensure_future(client.background_task_rotation_hype(), loop=client.loop)
-    asyncio.ensure_future(client.background_task_tournaments(), loop=client.loop)
-    asyncio.ensure_future(client.background_task_league_end(), loop=client.loop)
-    asyncio.ensure_future(client.background_task_spoiler_season(), loop=client.loop)
     client.init()
+    client.run(configuration.get('token'))
 
 def is_pd_server(guild: Guild) -> bool:
     return guild.id == 207281932214599682 # or guild.id == 226920619302715392
@@ -334,14 +354,20 @@ async def get_role(guild: Guild, rolename: str, create: bool = False) -> Optiona
         return await guild.create_role(name=rolename)
     return None
 
-def rotation_hype_message() -> str:
+async def rotation_hype_message() -> Optional[str]:
     runs, runs_percent, cs = rotation.read_rotation_files()
+    if rotation.next_rotation_is_supplemental():
+        cs = [c for c in cs if not c.pd_legal]
     runs_remaining = rotation.TOTAL_RUNS - runs
     newly_legal = [c for c in cs if c.hit_in_last_run and c.hits == rotation.TOTAL_RUNS / 2]
     newly_eliminated = [c for c in cs if not c.hit_in_last_run and c.status == 'Not Legal' and c.hits_needed == runs_remaining + 1]
     newly_hit = [c for c in cs if c.hit_in_last_run and c.hits == 1]
     num_undecided = len([c for c in cs if c.status == 'Undecided'])
-    s = f'Rotation run number {runs} completed. Rotation is {runs_percent}% complete.'
+    num_legal_cards = len([c for c in cs if c.status == 'Legal'])
+    name = 'Supplemental rotation' if rotation.next_rotation_is_supplemental() else 'Rotation'
+    s = f'{name} run number {runs} completed. {name} is {runs_percent}% complete. {num_legal_cards} cards confirmed.'
+    if not newly_hit + newly_legal + newly_eliminated and runs != 1 and runs % 5 != 0 and runs < rotation.TOTAL_RUNS / 2:
+        return None # Sometimes there's nothing to report
     if len(newly_hit) > 0 and runs_remaining > runs:
         newly_hit_s = list_of_most_interesting(newly_hit)
         s += f'\nFirst hit for: {newly_hit_s}.'
@@ -351,7 +377,7 @@ def rotation_hype_message() -> str:
     if len(newly_eliminated) > 0:
         newly_eliminated_s = list_of_most_interesting(newly_eliminated)
         s += f'\nEliminated: {newly_eliminated_s}.'
-    s += f"\nUndecided: {num_undecided} cards.\n<{fetcher.decksite_url('/rotation/')}>"
+    s += f"\nUndecided: {num_undecided}.\n<{fetcher.decksite_url('/rotation/')}>"
     return s
 
 # This does not currently actually find the most interesting just max 10 – only decksite knows about interestingness for now.

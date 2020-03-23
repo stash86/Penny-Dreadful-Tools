@@ -6,8 +6,7 @@ from MySQLdb import OperationalError
 
 from shared import configuration, perf
 from shared.pd_exception import (DatabaseException, DatabaseMissingException,
-                                 InvalidArgumentException,
-                                 LockNotAcquiredException)
+                                 InvalidArgumentException, LockNotAcquiredException)
 
 ValidSqlArgumentDescription = Any
 
@@ -158,9 +157,12 @@ def get_database(location: str) -> Database:
     return Database(location)
 
 def sqlescape(s: ValidSqlArgumentDescription, force_string: bool = False, backslashed_escaped: bool = False) -> ValidSqlArgumentDescription:
-    if str(s).isdecimal() and not force_string:
+    if s is None:
+        return 'NULL'
+    if (str(s).isdecimal() or isinstance(s, float)) and not force_string:
         return s
-    if isinstance(s, str):
+    if isinstance(s, (str, int, float)):
+        s = str(s)
         encodable = s.encode('utf-8', 'strict').decode('utf-8')
         if encodable.find('\x00') >= 0:
             raise Exception('NUL not allowed in SQL string.')

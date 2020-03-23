@@ -1,7 +1,8 @@
 import datetime
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 from magic import card, database, fetcher, mana, rotation
+from magic.card import TableDescription
 from magic.card_description import CardDescription
 from magic.database import create_table_def, db
 from magic.models import Card
@@ -25,13 +26,15 @@ def init() -> None:
             finally:
                 # if the above fails for some reason, then things are probably bad
                 # but we can't even start up a shell to fix unless the _cache_card table exists
-                update_cache()
+                rebuild_cache()
             reindex()
     except fetcher.FetchException:
         print('Unable to connect to Scryfall.')
 
 def layouts() -> Dict[str, bool]:
     return {
+        'adventure': True,
+        'art_series': False,
         'augment': False,
         'double_faced_token': False,
         'emblem': False,
@@ -97,7 +100,7 @@ def base_query(where: str = '(1 = 1)') -> str:
         GROUP BY u.id
     """.format(
         base_query_props=', '.join(prop['query'].format(table='u', column=name) for name, prop in card.base_query_properties().items()),
-        format_id=get_format_id('Penny Dreadful'),
+        format_id=get_format_id('Penny Dreadful', True),
         card_props=', '.join('c.{name}'.format(name=name) for name in card.card_properties()),
         face_props=', '.join('f.{name}'.format(name=name) for name in card.face_properties() if name not in ['id', 'name']),
         where=where)
@@ -145,141 +148,119 @@ def update_database(new_date: datetime.datetime) -> None:
     update_pd_legality()
     db().execute('INSERT INTO scryfall_version (last_updated) VALUES (%s)', [dtutil.dt2ts(new_date)])
     db().execute('SET FOREIGN_KEY_CHECKS=1') # OK we are done monkeying with the db put the FK checks back in place and recreate _cache_card.
-    update_cache()
+    rebuild_cache()
     db().commit('update_database')
 
 # Take Scryfall card descriptions and add them to the database. See also oracle.add_cards_and_update to also rebuild cache/reindex/etc.
-def insert_cards(printings: List[CardDescription]) -> None:
-    # pylint: disable=too-many-locals
-    rarity_ids = {x['name']:x['id'] for x in db().select('SELECT id, name FROM rarity;')}
-    scryfall_to_internal_rarity = {'common':('Common', rarity_ids['Common']),
-                                   'uncommon':('Uncommon', rarity_ids['Uncommon']),
-                                   'rare':('Rare', rarity_ids['Rare']),
-                                   'mythic':('Mythic Rare', rarity_ids['Mythic Rare'])}
-
-    # Strategy:
-    # Iterate through all printings of each cards, building several queries to be executed at the end.
-    # If we hit a new card, add it to the queries the several tables tracking cards:
-    #      card, face, card_color, card_color_identity, printing
-    # If it's a printing of a card we already have, just add to the printing query
-    # We need to special case the result (melded) side of meld cards, due to their general weirdness.
-
-    cards: Dict[str, int] = {}
-
-    meld_result_printings = []
-
-    card_query = 'INSERT INTO `card` (id, layout) VALUES '
-    card_values = []
-
-    card_color_query = 'INSERT IGNORE INTO `card_color` (card_id, color_id) VALUES '
-    card_color_values = []
-
-    card_color_identity_query = 'INSERT IGNORE INTO `card_color_identity` (card_id, color_id) VALUES '
-    card_color_identity_values = []
-
-    face_query = 'INSERT INTO `face` (card_id, position, '
-    face_query += ', '.join(name for name, prop in card.face_properties().items() if prop['scryfall'])
-    face_query += ') VALUES '
-    face_values = []
-
-    printing_query = 'INSERT INTO `printing` (card_id, set_id, '
-    printing_query += 'system_id, rarity, flavor, artist, number, multiverseid, watermark, border, timeshifted, reserved, mci_number, rarity_id'
-    printing_query += ') VALUES'
-    printing_values = []
-
-    colors_raw = db().select('SELECT id, symbol FROM color ORDER BY id;')
-    colors = {c['symbol'].upper(): c['id'] for c in colors_raw}
-
-    sets = {s['code']: s['id'] for s in db().select('SELECT id, code FROM `set`')}
-
+def insert_cards(printings: List[CardDescription]) -> List[int]:
     next_card_id = (db().value('SELECT MAX(id) FROM card') or 0) + 1
+    values = determine_values(printings, next_card_id)
+    insert_many('card', card.card_properties(), values['card'], ['id'])
+    if values['card_color']: # We should not issue this query if we are only inserting colorless cards as they don't have an entry in this table.
+        insert_many('card_color', card.card_color_properties(), values['card_color'])
+        insert_many('card_color_identity', card.card_color_properties(), values['card_color_identity'])
+    insert_many('printing', card.printing_properties(), values['printing'])
+    insert_many('face', card.face_properties(), values['face'], ['position'])
+    if values['card_legality']:
+        insert_many('card_legality', card.card_legality_properties(), values['card_legality'], ['legality'])
+    # Create the current Penny Dreadful format if necessary.
+    get_format_id('Penny Dreadful', True)
+    update_bugged_cards()
+    return [c['id'] for c in values['card']]
 
-    card_legality_query = 'INSERT IGNORE INTO `card_legality` (card_id, format_id, legality) VALUES '
-    card_legality_values = []
+def determine_values(printings: List[CardDescription], next_card_id: int) -> Dict[str, List[Dict[str, Any]]]:
+    # pylint: disable=too-many-locals
+    cards: Dict[str, int] = {}
+    card_values: List[Dict[str, Any]] = []
+    face_values: List[Dict[str, Any]] = []
+    meld_result_printings: List[CardDescription] = []
+    card_color_values: List[Dict[str, Any]] = []
+    card_color_identity_values: List[Dict[str, Any]] = []
+    printing_values: List[Dict[str, Any]] = []
+    card_legality_values: List[Dict[str, Any]] = []
+    rarity_ids = {x['name']: x['id'] for x in db().select('SELECT id, name FROM rarity')}
+    scryfall_to_internal_rarity = {
+        'common': rarity_ids['Common'],
+        'uncommon': rarity_ids['Uncommon'],
+        'rare':  rarity_ids['Rare'],
+        'mythic': rarity_ids['Mythic Rare']
+    }
+    sets = load_sets()
+    colors = {c['symbol'].upper(): c['id'] for c in db().select('SELECT id, symbol FROM color ORDER BY id')}
 
     for p in printings:
-        # Exclude little girl because {hw} mana is a problem rn.
-        if p['name'] == 'Little Girl':
+        if not valid_layout(p):
             continue
 
-        if is_meld_result(p):
-            meld_result_printings.append(p)
-
-        rarity, rarity_id = scryfall_to_internal_rarity[p['rarity'].strip()]
+        rarity_id = scryfall_to_internal_rarity[p['rarity'].strip()]
 
         try:
             set_id = sets[p['set']]
         except KeyError:
-            raise InvalidDataException(f"We think we should have set {p['set']} but it's not in {sets} (from {p})")
+            print(f"We think we should have set {p['set']} but it's not in {sets} (from {p}) so updating sets")
+            sets = update_sets()
+            set_id = sets[p['set']]
 
         # If we already have the card, all we need is to record the next printing of it
         if p['name'] in cards:
             card_id = cards[p['name']]
-            printing_values.append(printing_value(p, card_id, set_id, rarity_id, rarity))
+            printing_values.append(printing_value(p, card_id, set_id, rarity_id))
             continue
 
         card_id = next_card_id
         next_card_id += 1
-
         cards[p['name']] = card_id
-        card_values.append("({i},'{l}')".format(i=card_id, l=p['layout']))
+        card_values.append({'id': card_id, 'layout': p['layout']})
 
-        if p['layout'] in ['augment', 'emblem', 'host', 'leveler', 'meld', 'normal', 'planar', 'saga', 'scheme', 'token', 'vanguard']:
-            face_values.append(single_face_value(p, card_id))
-        elif p['layout'] in ['double_faced_token', 'flip', 'split', 'transform']:
+        if is_meld_result(p): # We don't make entries for a meld result until we know the card_ids of the front faces.
+            meld_result_printings.append(p)
+        elif p.get('card_faces') and p.get('layout') != 'meld':
             face_values += multiple_faces_values(p, card_id)
         else:
-            raise InvalidDataException(f"Found unexpected layout `{p['layout']}` in {p}")
-
+            face_values.append(single_face_value(p, card_id))
         for color in p.get('colors', []):
             color_id = colors[color]
-            card_color_values.append(f'({card_id}, {color_id})')
-
+            card_color_values.append({'card_id': card_id, 'color_id': color_id})
         for color in p.get('color_identity', []):
             color_id = colors[color]
-            card_color_identity_values.append(f'({card_id}, {color_id})')
-
+            card_color_identity_values.append({'card_id': card_id, 'color_id': color_id})
         for format_, status in p.get('legalities', {}).items():
             if status == 'not_legal' or format_.capitalize() == 'Penny': # Skip 'Penny' from Scryfall as we'll create our own 'Penny Dreadful' format and set legality for it from legal_cards.txt.
                 continue
             # Strictly speaking we could drop all this capitalizing and use what Scryfall sends us as the canonical name as it's just a holdover from mtgjson.
             format_id = get_format_id(format_.capitalize(), True)
-            internal_status = status.capitalize()
-            card_legality_values.append(f"({card_id}, {format_id}, '{internal_status}')")
+            card_legality_values.append({'card_id': card_id, 'format_id': format_id, 'legality': status.capitalize()})
 
         cards[p['name']] = card_id
-
-        printing_values.append(printing_value(p, card_id, set_id, rarity_id, rarity))
-
-    card_query += ',\n'.join(card_values)
-    card_query += ';'
-    db().execute(card_query)
-
-    if card_color_values: # We should not issue this query if we are only inserting colorless cards as they don't have an entry in this table.
-        card_color_query += ',\n'.join(card_color_values) + ';'
-        db().execute(card_color_query)
-        card_color_identity_query += ',\n'.join(card_color_identity_values) + ';'
-        db().execute(card_color_identity_query)
+        printing_values.append(printing_value(p, card_id, set_id, rarity_id))
 
     for p in meld_result_printings:
-        insert_meld_result_faces(p, cards)
+        face_values += meld_face_values(p, cards)
 
-    printing_query += ',\n'.join(printing_values)
-    printing_query += ';'
-    db().execute(printing_query)
+    return {
+        'card': card_values,
+        'card_color': card_color_values,
+        'card_color_identity': card_color_identity_values,
+        'face': face_values,
+        'printing': printing_values,
+        'card_legality': card_legality_values
+    }
 
-    face_query += ',\n'.join(face_values)
-    face_query += ';'
-    db().execute(face_query)
+def valid_layout(p: CardDescription) -> bool:
+    # Exclude art_series because they have the same name as real cards and that breaks things.
+    # Exclude token because named tokens like "Ajani's Pridemate" and "Storm Crow" conflict with the cards with the same name. See #6156.
+    return p['layout'] not in ['art_series', 'token']
 
-    if card_legality_values:
-        card_legality_query += ',\n'.join(card_legality_values)
-        card_legality_query += ';'
-        db().execute(card_legality_query)
-
-    # Create the current Penny Dreadful format if necessary.
-    get_format_id('Penny Dreadful', True)
-    update_bugged_cards()
+def insert_many(table: str, properties: TableDescription, values: List[Dict[str, Any]], additional_columns: Optional[List[str]] = None) -> None:
+    columns = additional_columns or []
+    columns += [k for k, v in properties.items() if v.get('foreign_key')]
+    columns += [name for name, prop in properties.items() if prop['scryfall']]
+    query = f'INSERT INTO `{table}` ('
+    query += ', '.join(columns)
+    query += ') VALUES ('
+    query += '), ('.join(', '.join(str(sqlescape(entry[column])) for column in columns) for entry in values)
+    query += ')'
+    db().execute(query)
 
 def update_bugged_cards() -> None:
     bugs = fetcher.bugged_cards()
@@ -303,67 +284,48 @@ def update_pd_legality() -> None:
             break
         set_legal_cards(season=s)
 
-def insert_face(p: CardDescription, card_id: int, position: int = 1) -> None:
+def single_face_value(p: CardDescription, card_id: int, position: int = 1) -> Dict[str, Any]:
     if not card_id:
         raise InvalidDataException(f'Cannot insert a face without a card_id: {p}')
-    p['oracle_text'] = p.get('oracle_text', '')
-    sql = 'INSERT INTO face (card_id, position, '
-    sql += ', '.join(name for name, prop in card.face_properties().items() if prop['scryfall'])
-    sql += ') VALUES (%s, %s, '
-    sql += ', '.join('%s' for name, prop in card.face_properties().items() if prop['scryfall'])
-    sql += ')'
-    values: List[Any] = [card_id, position]
-    values += [p.get(database2json(name)) for name, prop in card.face_properties().items() if prop['scryfall']]
-    db().execute(sql, values)
+    result: Dict[str, Any] = {}
+    result['card_id'] = card_id
+    result['name'] = p['name'] # always present in scryfall
+    result['mana_cost'] = p['mana_cost'] # always present in scryfall
+    result['cmc'] = p['cmc'] # always present
+    result['power'] = p.get('power')
+    result['toughness'] = p.get('toughness')
+    result['loyalty'] = p.get('loyalty')
+    result['type_line'] = p.get('type_line', '')
+    result['oracle_text'] = p.get('oracle_text', '')
+    result['hand'] = p.get('hand_modifier')
+    result['life'] = p.get('life_modifier')
+    result['position'] = position
+    return result
 
-def single_face_value(p: CardDescription, card_id: int, position: int = 1) -> str:
-    # pylint: disable=too-many-locals
-    if not card_id:
-        raise InvalidDataException(f'Cannot insert a face without a card_id: {p}')
-
-    name = sqlescape(p['name']) # always present in scryfall
-    mana_cost = sqlescape(p['mana_cost']) #always present in scryfall
-    cmc = p['cmc'] # always present
-    def sqlescape_or_null(arg: Any) -> str:
-        if arg:
-            return sqlescape(arg)
-        return 'NULL'
-    power = sqlescape_or_null(p.get('power'))
-    toughness = sqlescape_or_null(p.get('toughness'))
-    loyalty = sqlescape_or_null(p.get('loyalty'))
-    type_line = sqlescape(p['type_line']) # always present
-    oracle_text = sqlescape(p.get('oracle_text', ''))
-    image_name = 'NULL' # deprecated
-    hand = sqlescape_or_null(p.get('hand_modifier'))
-    life = sqlescape_or_null(p.get('life_modifier'))
-    starter = 'NULL' # deprecated
-
-    return f'({card_id}, {position}, {name}, {mana_cost}, {cmc}, {power}, {toughness}, {loyalty}, {type_line}, {oracle_text}, {image_name}, {hand}, {life}, {starter})'
-
-def multiple_faces_values(p: CardDescription, card_id: int) -> List[str]:
+def multiple_faces_values(p: CardDescription, card_id: int) -> List[Dict[str, Any]]:
     card_faces = p.get('card_faces')
     if card_faces is None:
         raise InvalidArgumentException(f'Tried to insert_card_faces on a card without card_faces: {p} ({card_id})')
     first_face_cmc = mana.cmc(card_faces[0]['mana_cost'])
     position = 1
-
     face_values = []
     for face in card_faces:
         # Scryfall doesn't provide cmc on card_faces currently. See #5939.
         face['cmc'] = mana.cmc(face['mana_cost']) if face['mana_cost'] else first_face_cmc
         face_values.append(single_face_value(face, card_id, position))
         position += 1
-
     return face_values
 
-def insert_meld_result_faces(p: CardDescription, cards: Dict[str, int]) -> None:
+def meld_face_values(p: CardDescription, cards: Dict[str, int]) -> List[Dict[str, Any]]:
+    values = []
     all_parts = p.get('all_parts')
     if all_parts is None:
         raise InvalidArgumentException(f'Tried to insert_meld_result_faces on a card without all_parts: {p}')
     front_face_names = [part['name'] for part in all_parts if part['component'] == 'meld_part']
     card_ids = [cards[name] for name in front_face_names]
     for card_id in card_ids:
-        insert_face(p, card_id, 2)
+        values.append(single_face_value(p, card_id, 2))
+    return values
 
 def is_meld_result(p: CardDescription) -> bool:
     all_parts = p.get('all_parts')
@@ -372,9 +334,12 @@ def is_meld_result(p: CardDescription) -> bool:
     meld_result_name = next(part['name'] for part in all_parts if part['component'] == 'meld_result')
     return p['name'] == meld_result_name
 
+def load_sets() -> dict:
+    return {s['code']: s['id'] for s in db().select('SELECT id, code FROM `set`')}
+
 def insert_set(s: Any) -> int:
     sql = 'INSERT INTO `set` ('
-    sql += ', '.join(name for name, prop in card.set_properties().items() if prop['scryfall'])
+    sql += ', '.join(name for name, prop in card.set_properties().items() if prop['scryfall']) # pylint: disable=invalid-sequence-index
     sql += ') VALUES ('
     sql += ', '.join('%s' for name, prop in card.set_properties().items() if prop['scryfall'])
     sql += ')'
@@ -382,32 +347,30 @@ def insert_set(s: Any) -> int:
     db().execute(sql, values)
     return db().last_insert_rowid()
 
-def printing_value(p: CardDescription, card_id: int, set_id: int, rarity_id: int, rarity: str) -> str:
+def update_sets() -> dict:
+    sets = load_sets()
+    for s in fetcher.all_sets():
+        if s['code'] not in sets.keys():
+            insert_set(s)
+    return load_sets()
+
+def printing_value(p: CardDescription, card_id: int, set_id: int, rarity_id: int) -> Dict[str, Any]:
     # pylint: disable=too-many-locals
     if not card_id or not set_id:
         raise InvalidDataException(f'Cannot insert printing without card_id and set_id: {card_id}, {set_id}, {p}')
-    system_id = p.get('id')
-    raw_flavor_text = p.get('flavor_text')
-    if raw_flavor_text:
-        flavor = sqlescape(raw_flavor_text)
-    else:
-        flavor = 'NULL'
-    artist = sqlescape(p.get('artist'))
-    number = p.get('collector_number')
-    multiverseid = 'NULL'
-    raw_watermark = p.get('watermark')
-    if raw_watermark:
-        watermark = sqlescape(raw_watermark)
-    else:
-        watermark = 'NULL'
-    border = 'NULL'
-    timeshifted = 'NULL'
-    reserved = 1 if p.get('reserved') else 0 # replace True and False with 1 and 0
-    mci_number = 'NULL'
-    sql = f"('{card_id}', '{set_id}', '{system_id}', '{rarity}', {flavor}, {artist}, '{number}', '{multiverseid}', {watermark}, {border}, {timeshifted}, {reserved}, {mci_number}, '{rarity_id}')"
-    return sql
+    result: Dict[str, Any] = {}
+    result['card_id'] = card_id
+    result['set_id'] = set_id
+    result['rarity_id'] = rarity_id
+    result['system_id'] = p.get('id')
+    result['flavor'] = p.get('flavor_text')
+    result['artist'] = p.get('artist')
+    result['number'] = p.get('collector_number')
+    result['watermark'] = p.get('watermark')
+    result['reserved'] = 1 if p.get('reserved') else 0 # replace True and False with 1 and 0
+    return result
 
-def set_legal_cards(season: str = None) -> Set[str]:
+def set_legal_cards(season: str = None) -> None:
     new_list: Set[str] = set()
     try:
         new_list = set(fetcher.legal_cards(force=True, season=season))
@@ -419,7 +382,16 @@ def set_legal_cards(season: str = None) -> Set[str]:
         format_id = get_format_id('Penny Dreadful {season}'.format(season=season), True)
 
     if new_list == set() or new_list is None:
-        return set()
+        return
+    if season is not None:
+        # Older formats don't change
+        populated = db().select('SELECT id from card_legality WHERE format_id = %s LIMIT 1', [format_id])
+        if populated:
+            return
+
+    # In case we get windows line endings.
+    new_list = set(c.rstrip() for c in new_list)
+
     db().begin('set_legal_cards')
     db().execute('DELETE FROM card_legality WHERE format_id = %s', [format_id])
     db().execute('SET group_concat_max_len=100000')
@@ -431,7 +403,7 @@ def set_legal_cards(season: str = None) -> Set[str]:
             legal_cards.append("({format_id}, {card_id}, 'Legal')".format(format_id=format_id,
                                                                           card_id=row['id']))
     sql = """INSERT INTO card_legality (format_id, card_id, legality)
-             VALUES {values};""".format(values=',\n'.join(legal_cards))
+             VALUES {values}""".format(values=', '.join(legal_cards))
 
     db().execute(sql)
     db().commit('set_legal_cards')
@@ -442,9 +414,8 @@ def set_legal_cards(season: str = None) -> Set[str]:
         sql = 'SELECT bq.name FROM ({base_query}) AS bq WHERE bq.id IN (SELECT card_id FROM card_legality WHERE format_id = {format_id})'.format(base_query=base_query(), format_id=format_id)
         db_legal_list = [row['name'] for row in db().select(sql)]
         print(set(new_list).symmetric_difference(set(db_legal_list)))
-    return new_list
 
-def update_cache() -> None:
+def rebuild_cache() -> None:
     db().execute('DROP TABLE IF EXISTS _new_cache_card')
     db().execute('SET group_concat_max_len=100000')
     db().execute(create_table_def('_new_cache_card', card.base_query_properties(), base_query()))
@@ -456,6 +427,14 @@ def update_cache() -> None:
     db().execute('RENAME TABLE _cache_card TO _old_cache_card, _new_cache_card TO _cache_card')
     db().execute('DROP TABLE IF EXISTS _old_cache_card')
 
+def add_to_cache(ids: List[int]) -> None:
+    if not ids:
+        return
+    values = ', '.join([str(id) for id in ids])
+    query = base_query(f'c.id IN ({values})')
+    sql = f'INSERT INTO _cache_card {query}'
+    db().execute(sql)
+
 def reindex() -> None:
     writer = WhooshWriter()
     cs = get_all_cards()
@@ -464,6 +443,11 @@ def reindex() -> None:
             if c.name == name:
                 c.names.append(alias)
     writer.rewrite_index(cs)
+
+def reindex_specific_cards(cs: List[Card]) -> None:
+    writer = WhooshWriter()
+    for c in cs:
+        writer.update_card(c)
 
 def database2json(propname: str) -> str:
     if propname == 'system_id':
@@ -513,3 +497,11 @@ def subtypes(type_line: str) -> List[str]:
     if ' - ' not in type_line:
         return []
     return type_line.split(' - ')[1].split(' ')
+
+# If you change this you probably need to change magic.card.name_query too.
+def name_from_card_description(c: CardDescription) -> str:
+    if c['layout'] in ['transform', 'flip', 'adventure']: # 'meld' has 'all_parts' not 'card_faces' so does not need to be included here despite having very similar behavior.
+        return c['card_faces'][0]['name']
+    if c.get('card_faces'):
+        return ' // '.join([f['name'] for f in c.get('card_faces', [])])
+    return c['name']

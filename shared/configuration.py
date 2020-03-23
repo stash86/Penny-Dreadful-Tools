@@ -11,7 +11,7 @@ from shared.pd_exception import InvalidArgumentException, InvalidDataException
 
 RE_SUBKEY = re.compile(r'(\w+)\.(\w+)')
 
-DEFAULTS = {
+DEFAULTS: Dict[str, Any] = {
     # On production, /rotation/ turns off when not active.
     'always_show_rotation': False,
     # Discord Webhook endpoint
@@ -49,6 +49,9 @@ DEFAULTS = {
     'league_webhook_id': None,
     'league_webhook_token': None,
     'legality_dir': '~/legality/Legality Checker/',
+    'logsite_protocol': 'https',
+    'logsite_hostname': 'logs.pennydreadfulmagic.com',
+    'logsite_port': 80,
     'logsite_database': 'pdlogs',
     'magic_database': 'cards',
     'modo_bugs_dir': 'modo_bugs_repo',
@@ -130,6 +133,11 @@ def get_float(key: str) -> Optional[float]:
         return val
     if isinstance(val, int):
         return write(key, float(val))
+    if isinstance(val, str):
+        # required so that we can pass int-values in environment variables
+        CONFIG[key] = float(val)
+        return CONFIG[key]
+
     raise fail(key, val, float)
 
 def get_list(key: str) -> List[str]:

@@ -1,6 +1,8 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union, cast
 
-from flask import request, session, url_for
+import titlecase
+from flask import make_response, redirect, request, session, url_for
+from werkzeug import wrappers
 
 from decksite import APP, auth
 from decksite import league as lg
@@ -11,22 +13,23 @@ from decksite.data import match as ms
 from decksite.data import news as ns
 from decksite.data import person as ps
 from decksite.data import rule as rs
-from decksite.views import (Admin, EditAliases, EditArchetypes, EditMatches,
-                            EditNews, EditRules, PlayerNotes, Prizes,
+from decksite.league import RetireForm
+from decksite.views import (Admin, AdminRetire, EditAliases, EditArchetypes, EditLeague,
+                            EditMatches, EditNews, EditRules, PlayerNotes, Prizes,
                             RotationChecklist, Unlink)
 from magic.models import Deck
 from shared import dtutil, redis
 from shared.container import Container
 from shared.pd_exception import InvalidArgumentException
+from shared_web.decorators import fill_form
 
 
 def admin_menu() -> List[Dict[str, str]]:
     m = []
-    urls = sorted([url_for(rule.endpoint) for rule in APP.url_map.iter_rules() if 'GET' in rule.methods and rule.rule.startswith('/admin')])
-    for url in urls:
-        name = url.replace('/admin/', '').strip('/')
-        name = name if name else 'Admin Home'
-        m.append({'name': name, 'url': url})
+    endpoints = sorted([rule.endpoint for rule in APP.url_map.iter_rules() if 'GET' in rule.methods and rule.rule.startswith('/admin')])
+    for endpoint in endpoints:
+        name = titlecase.titlecase(endpoint.replace('_', ' ')) if endpoint else 'Admin Home'
+        m.append({'name': name, 'endpoint': endpoint, 'url': url_for(endpoint)})
     return m
 
 @APP.route('/admin/')
@@ -39,15 +42,16 @@ def admin_home() -> str:
 @auth.admin_required
 def edit_aliases() -> str:
     aliases = ps.load_aliases()
-    all_people = ps.load_people(order_by='p.mtgo_username')
+    all_people = ps.load_people(order_by_name=True)
     view = EditAliases(aliases, all_people)
     return view.page()
 
+@fill_form('person_id')
 @APP.route('/admin/aliases/', methods=['POST'])
 @auth.admin_required
-def post_aliases() -> str:
-    if request.form.get('person_id') is not None and request.form.get('alias') is not None and len(request.form.get('alias', '')) > 0:
-        ps.add_alias(request.form.get('person_id'), request.form.get('alias'))
+def post_aliases(person_id: int = None, alias: str = None) -> Union[str, wrappers.Response]:
+    if person_id is not None and alias is not None and len(alias) > 0:
+        ps.add_alias(person_id, alias)
     return edit_aliases()
 
 @APP.route('/admin/archetypes/')
@@ -60,7 +64,7 @@ def edit_archetypes(search_results: Optional[List[Deck]] = None, q: str = '', no
 
 @APP.route('/admin/archetypes/', methods=['POST'])
 @auth.demimod_required
-def post_archetypes() -> str:
+def post_archetypes() -> wrappers.Response:
     search_results: List[Deck] = []
     if request.form.get('deck_id') is not None:
         archetype_ids = request.form.getlist('archetype_id')
@@ -70,20 +74,20 @@ def post_archetypes() -> str:
         for deck_id in request.form.getlist('deck_id'):
             archetype_id = archetype_ids.pop(0)
             if archetype_id:
-                archs.assign(deck_id, archetype_id)
+                archs.assign(deck_id, archetype_id, auth.person_id())
                 redis.clear(f'decksite:deck:{deck_id}')
     elif request.form.get('q') is not None and request.form.get('notq') is not None:
-        search_results = ds.load_decks_by_cards(request.form.get('q').splitlines(), request.form.get('notq').splitlines())
+        search_results = ds.load_decks_by_cards(cast(str, request.form.get('q')).splitlines(), cast(str, request.form.get('notq')).splitlines())
     elif request.form.get('find_conflicts') is not None:
         search_results = ds.load_conflicted_decks()
     elif request.form.get('rename_to') is not None:
-        archs.rename(request.form.get('archetype_id'), request.form.get('rename_to'))
+        archs.rename(cast_int(request.form.get('archetype_id')), cast(str, request.form.get('rename_to')))
     elif request.form.get('new_description') is not None:
-        archs.update_description(request.form.get('archetype_id'), request.form.get('new_description'))
+        archs.update_description(cast_int(request.form.get('archetype_id')), cast(str, request.form.get('new_description')))
     elif request.form.getlist('archetype_id') is not None and len(request.form.getlist('archetype_id')) == 2:
         archs.move(request.form.getlist('archetype_id')[0], request.form.getlist('archetype_id')[1])
     elif request.form.get('parent') is not None:
-        archs.add(request.form.get('name'), request.form.get('parent'))
+        archs.add(cast(str, request.form.get('name')), cast_int(request.form.get('parent')))
     else:
         raise InvalidArgumentException('Did not find any of the expected keys in POST to /admin/archetypes: {f}'.format(f=request.form))
     return edit_archetypes(search_results, request.form.get('q', ''), request.form.get('notq', ''))
@@ -99,29 +103,54 @@ def edit_rules() -> str:
 
 @APP.route('/admin/rules/', methods=['POST'])
 @auth.demimod_required
-def post_rules() -> str:
+def post_rules() -> wrappers.Response:
     if request.form.get('archetype_id') is not None:
-        rs.add_rule(int(request.form.get('archetype_id')))
+        rs.add_rule(cast_int(request.form.get('archetype_id')))
     else:
         raise InvalidArgumentException('Did not find any of the expected keys in POST to /admin/rules: {f}'.format(f=request.form))
     return edit_rules()
 
+@APP.route('/admin/retire/')
+@auth.admin_required
+def admin_retire_deck(form: Optional[RetireForm] = None) -> str:
+    if form is None:
+        form = RetireForm(request.form)
+    view = AdminRetire(form)
+    return view.page()
+
+@APP.route('/admin/retire/', methods=['POST'])
+@auth.admin_required
+def do_admin_retire_deck() -> wrappers.Response:
+    form = RetireForm(request.form)
+    if form.validate():
+        d = ds.load_deck(form.entry)
+        lg.retire_deck(d)
+        return redirect(url_for('admin_retire_deck'))
+    return make_response(admin_retire_deck(form))
+
 @APP.route('/admin/matches/')
 @auth.admin_required
 def edit_matches() -> str:
-    view = EditMatches(lg.active_league().decks, lg.load_latest_league_matches())
+    view = EditMatches(lg.active_league(should_load_decks=True).decks, lg.load_latest_league_matches())
     return view.page()
 
 @APP.route('/admin/matches/', methods=['POST'])
 @auth.admin_required
-def post_matches() -> str:
+def post_matches() -> wrappers.Response:
+    if request.form.get('match_id'):
+        match_id = cast_int(request.form.get('match_id'))
+    if request.form.get('action') == 'delete':
+        ms.delete_match(match_id)
+        return redirect(url_for('edit_matches'))
+    left_id = cast_int(request.form.get('left_id'))
+    left_games = cast_int(request.form.get('left_games'))
+    right_id = cast_int(request.form.get('right_id'))
+    right_games = cast_int(request.form.get('right_games'))
     if request.form.get('action') == 'change':
-        lg.update_match(request.form.get('match_id'), request.form.get('left_id'), request.form.get('left_games'), request.form.get('right_id'), request.form.get('right_games'))
-    elif request.form.get('action') == 'delete':
-        lg.delete_match(request.form.get('match_id'))
+        ms.update_match(match_id, left_id, left_games, right_id, right_games)
     elif request.form.get('action') == 'add':
-        ms.insert_match(dtutil.now(), request.form.get('left_id'), request.form.get('left_games'), request.form.get('right_id'), request.form.get('right_games'), None, None, None)
-    return edit_matches()
+        ms.insert_match(dtutil.now(), left_id, left_games, right_id, right_games, None, None, None)
+    return redirect(url_for('edit_matches'))
 
 @APP.route('/admin/news/')
 @auth.admin_required
@@ -131,15 +160,17 @@ def edit_news() -> str:
     view = EditNews(news_items)
     return view.page()
 
+@fill_form('news_id', 'title', 'url')
 @APP.route('/admin/news/', methods=['POST'])
 @auth.admin_required
-def post_news() -> str:
+def post_news(news_id: int, title: str = None, url: str = None, date: str = None) -> wrappers.Response:
     if request.form.get('action') == 'delete':
-        ns.delete(request.form.get('id'))
+        ns.delete(news_id)
     else:
-        date = dtutil.parse(request.form.get('date'), dtutil.FORM_FORMAT, dtutil.WOTC_TZ)
-        ns.add_or_update_news(request.form.get('id'), date, request.form.get('title'), request.form.get('url'))
-    return edit_news()
+        if date is not None and title is not None and url is not None:
+            date_dt = dtutil.parse(date, dtutil.FORM_FORMAT, dtutil.WOTC_TZ)
+            ns.add_or_update_news(news_id, date_dt, title, url)
+    return redirect(url_for('edit_news'))
 
 @APP.route('/admin/prizes/')
 def prizes() -> str:
@@ -157,21 +188,23 @@ def rotation_checklist() -> str:
 @auth.admin_required
 def player_notes() -> str:
     notes = ps.load_notes()
-    all_people = ps.load_people(order_by='p.mtgo_username')
+    all_people = ps.load_people(order_by_name=True)
     view = PlayerNotes(notes, all_people)
     return view.page()
 
 @APP.route('/admin/people/notes/', methods=['POST'])
 @auth.admin_required
-def post_player_note() -> str:
+def post_player_note() -> wrappers.Response:
+    if not request.form.get('person_id') or not request.form.get('note'):
+        raise InvalidArgumentException(f'Did not find any of the expected keys in POST to /admin/people/notes: {request.form}')
     creator = ps.load_person_by_discord_id(session['id'])
-    ps.add_note(creator.id, request.form.get('person_id'), request.form.get('note'))
-    return player_notes()
+    ps.add_note(creator.id, request.form['person_id'], request.form['note'])
+    return redirect(url_for('player_notes'))
 
 @APP.route('/admin/unlink/')
 @auth.admin_required
 def unlink(num_affected_people: Optional[int] = None, errors: List[str] = None) -> str:
-    all_people = ps.load_people(order_by='p.mtgo_username')
+    all_people = ps.load_people(order_by_name=True)
     view = Unlink(all_people, num_affected_people, errors)
     return view.page()
 
@@ -190,3 +223,19 @@ def post_unlink() -> str:
         except ValueError:
             errors.append('Discord ID must be an integer.')
     return unlink(n, errors)
+
+@APP.route('/admin/league/')
+@auth.admin_required
+def edit_league() -> str:
+    view = EditLeague(lg.get_status())
+    return view.page()
+
+@APP.route('/admin/league/', methods=['POST'])
+@auth.admin_required
+def post_league() -> str:
+    status = lg.Status.CLOSED if request.form.get('action') == 'close' else lg.Status.OPEN
+    lg.set_status(status)
+    return edit_league()
+
+def cast_int(param: Optional[Any]) -> int:
+    return int(cast(str, param))

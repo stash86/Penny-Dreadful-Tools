@@ -1,7 +1,7 @@
 import json
 import os
 import urllib.request
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 import requests
@@ -30,14 +30,14 @@ def fetch(url: str, character_encoding: Optional[str] = None, force: bool = Fals
         if character_encoding is not None:
             response.encoding = character_encoding
         if response.status_code in [500, 502, 503]:
-            raise FetchException(f'Server returned a {response.status_code}')
+            raise FetchException(f'Server returned a {response.status_code} from {url}')
         p = perf.start()
         t = response.text
         took = round(perf.took(p), 2)
         if took > 1:
             print('Getting text from response was very slow. Setting an explicit character_encoding may help.')
         return t
-    except (urllib.error.HTTPError, requests.exceptions.ConnectionError) as e: # type: ignore # urllib isn't fully stubbed
+    except (urllib.error.HTTPError, requests.exceptions.ConnectionError, TimeoutError) as e: # type: ignore # urllib isn't fully stubbed
         if retry:
             return fetch(url, character_encoding, force, retry=False)
         raise FetchException(e)
@@ -92,6 +92,25 @@ def store(url: str, path: str) -> requests.Response:
         return response
     except urllib.error.HTTPError as e: # type: ignore
         raise FetchException(e)
+    except requests.exceptions.ConnectionError as e: # type: ignore
+        raise FetchException(e)
+
+
+async def store_async(url: str, path: str) -> aiohttp.ClientResponse:
+    print('Async storing {url} in {path}'.format(url=url, path=path))
+    try:
+        async with aiohttp.ClientSession() as aios:
+            response = await aios.get(url)
+            with open(path, 'wb') as fout:
+                while True:
+                    chunk = await response.content.read(1024)
+                    if not chunk:
+                        break
+                    fout.write(chunk)
+            return response
+    # type: ignore # urllib isn't fully stubbed
+    except (urllib.error.HTTPError, aiohttp.ClientError) as e:
+        raise FetchException(e)
 
 class FetchException(OperationalException):
     pass
@@ -110,3 +129,23 @@ def escape(str_input: str, skip_double_slash: bool = False) -> str:
     if skip_double_slash:
         s = s.replace('-split-', '//')
     return s
+
+#pylint: disable=R0913
+def post_discord_webhook(webhook_id: str,
+                         webhook_token: str,
+                         message: str = None,
+                         username: str = None,
+                         avatar_url: str = None,
+                         embeds: List[Dict[str, Any]] = None
+                         ) -> bool:
+    if webhook_id is None or webhook_token is None:
+        return False
+    url = 'https://discordapp.com/api/webhooks/{id}/{token}'.format(
+        id=webhook_id, token=webhook_token)
+    post(url, json_data={
+        'content': message,
+        'username': username,
+        'avatar_url': avatar_url,
+        'embeds': embeds,
+    })
+    return True

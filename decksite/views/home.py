@@ -4,7 +4,9 @@ from flask import url_for
 from flask_babel import gettext
 
 from decksite.view import View
+from magic import rotation
 from magic.models import Card, Deck
+from shared import dtutil
 from shared.container import Container
 
 
@@ -15,7 +17,9 @@ class Home(View):
         self.setup_news(news)
         self.setup_decks(decks)
         self.setup_cards(cards)
+        self.setup_rotation()
         self.setup_stats(matches_stats)
+        self.setup_tournaments()
 
     def setup_news(self, news: List[Container]) -> None:
         self.news = news
@@ -76,27 +80,40 @@ class Home(View):
         cards = [c for c in cards if 'Basic Land' not in c.type_line]
         self.top_cards = cards[0:8]
         self.cards = self.top_cards # To get prepare_card treatment
-        self.cards_url = url_for('cards')
+        self.cards_url = url_for('.cards')
+
+    def setup_rotation(self) -> None:
+        self.season_start_display = dtutil.display_date(rotation.last_rotation())
+        self.season_end_display = dtutil.display_date(rotation.next_rotation())
+        self.scryfall_url = 'https://scryfall.com/search?q=f%3Apd'
+        self.legal_cards_url = 'http://pdmtgo.com/legal_cards.txt'
+        self.in_rotation = rotation.in_rotation()
+        self.rotation_msg = 'Supplemental' if rotation.next_rotation_is_supplemental() else 'Full' + ' rotation is in progress.'
+        self.rotation_url = url_for('rotation')
 
     def setup_stats(self, matches_stats: Dict[str, int]) -> None:
+        # Human-friendly number formatting like "29,000".
+        matches_stats_display = {}
+        for k, v in matches_stats.items():
+            matches_stats_display[k] = '{:,}'.format(v) if v else ''
         self.community_stats = [
             {
                 'header': 'League and Tournament Matches Played',
                 'stats': [
                     {
-                        'text': f"{matches_stats['num_matches_today']} matches played today"
+                        'text': f"{matches_stats_display['num_matches_today']} matches played today"
                     },
                     {
-                        'text': f"{matches_stats['num_matches_this_week']} matches played this week"
+                        'text': f"{matches_stats_display['num_matches_this_week']} matches played this week"
                     },
                     {
-                        'text': f"{matches_stats['num_matches_this_month']} matches played this month"
+                        'text': f"{matches_stats_display['num_matches_this_month']} matches played this month"
                     },
                     {
-                        'text': f"{matches_stats['num_matches_this_season']} matches played this season"
+                        'text': f"{matches_stats_display['num_matches_this_season']} matches played this season"
                     },
                     {
-                        'text': f"{matches_stats['num_matches_all_time']} matches played all time"
+                        'text': f"{matches_stats_display['num_matches_all_time']} matches played all time"
                     }
                 ]
             }

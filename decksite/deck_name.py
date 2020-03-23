@@ -3,7 +3,7 @@ from collections import OrderedDict
 from typing import List, Optional, Set
 
 import titlecase
-from profanity import profanity
+from better_profanity import profanity
 
 from magic import mana
 from magic.models import Deck
@@ -66,6 +66,7 @@ def normalize(d: Deck) -> str:
         name = d.original_name
         name = name.lower()
         name = replace_space_alternatives(name)
+        name = remove_extra_spaces(name)
         name = remove_pd(name)
         name = remove_hashtags(name)
         name = remove_brackets(name)
@@ -79,11 +80,11 @@ def normalize(d: Deck) -> str:
         elif name and d.get('archetype_name') and name == d.get('archetype_name', '').lower():
             pass
         else:
+            name = remove_profanity(name)
             name = add_colors_if_no_deckname(name, d.get('colors'))
-            name = normalize_colors(name)
+            name = normalize_colors(name, d.get('colors'))
             name = add_archetype_if_just_colors(name, d.get('archetype_name'))
             name = remove_mono_if_not_first_word(name)
-            name = remove_profanity(name)
         name = ucase_trailing_roman_numerals(name)
         name = titlecase.titlecase(name)
         return correct_case_of_color_names(name)
@@ -101,14 +102,17 @@ def replace_space_alternatives(name: str) -> str:
     name = name.replace('_', ' ').replace('.', ' ')
     return name.replace('TEMPORARYMARKER', '.')
 
+def remove_extra_spaces(name: str) -> str:
+    return re.sub(r'\s+', ' ', name)
+
 def remove_pd(name: str) -> str:
-    name = re.sub(r'(^| )[\[\(]?pd ?-? ?[0-9]+[\[\(]?', '', name, flags=re.IGNORECASE).strip()
+    name = re.sub(r'(^| )[\[\(]?pd ?-? ?[0-9]+[\[\)]?', '', name, flags=re.IGNORECASE).strip()
     name = re.sub(r'(^| )[\[\(]?pd[hmstf]?[\]\)]?([ -]|$)', '', name, flags=re.IGNORECASE).strip()
     name = re.sub(r'(^| )[\[\(]?penny ?dreadful (sunday|monday|thursday)[\[\(]?( |$)', '', name, flags=re.IGNORECASE).strip()
-    name = re.sub(r'(^| )[\[\(]?penny ?dreadful[\[\(]?( |$)', '', name, flags=re.IGNORECASE).strip()
-    name = re.sub(r'(^| )[\[\(]?penny[\[\(]?( |$)', '', name, flags=re.IGNORECASE).strip()
-    name = re.sub(r'(^| )[\[\(]?season ?[0-9]+[\[\(]?( |$)', '', name, flags=re.IGNORECASE).strip()
-    name = re.sub(r'(^| )[\[\(]?S[0-9]+[\[\(]?', '', name, flags=re.IGNORECASE).strip()
+    name = re.sub(r'(^| )[\[\(]?penny ?dreadful[\[\)]?( |$)', '', name, flags=re.IGNORECASE).strip()
+    name = re.sub(r'(^| )[\[\(]?penny[\[\)]?( |$)', '', name, flags=re.IGNORECASE).strip()
+    name = re.sub(r'(^| )[\[\(]?season ?[0-9]+[\[\)]?( |$)', '', name, flags=re.IGNORECASE).strip()
+    name = re.sub(r'(^| )[\[\(]?S[0-9]+[\[\)]?', '', name, flags=re.IGNORECASE).strip()
     return name
 
 def remove_hashtags(name: str) -> str:
@@ -129,7 +133,7 @@ def whitelisted(name: str) -> bool:
             return True
     return False
 
-def normalize_colors(name: str) -> str:
+def normalize_colors(name: str, colors: List[str]) -> str:
     patterns = ['[WUBRG][WUBRG]*', '[WUBRG](/[WUBRG])*']
     patterns += ['(White|Blue|Black|Red|Green)(/(White|Blue|Black|Red|Green))+']
     patterns += list(COLOR_COMBINATIONS.keys())
@@ -147,20 +151,20 @@ def normalize_colors(name: str) -> str:
     name = name.replace(color_words[0], true_color, 1)
     for color_word in color_words[1:]:
         name = name.replace(color_word, '')
-    if len(canonical_colors) == 1 and name.startswith(true_color):
+    if len(canonical_colors) == 1 and len(colors) == 1 and name.startswith(true_color) and not [True for abbrev in ABBREVIATIONS.values() if name.lower().startswith(abbrev)]:
         name = 'mono {name}'.format(name=name)
     return name.strip()
 
-def canonicalize_colors(colors: List[str]) -> List[str]:
-    color_words = []
+def canonicalize_colors(colors: List[str]) -> Set[str]:
+    color_words: Set[str] = set()
     for color in colors:
-        color_words.append(standardize_color_string(color))
+        color_words.add(standardize_color_string(color))
     canonical_colors: Set[str] = set()
     for color in color_words:
         for name, symbols in COLOR_COMBINATIONS.items():
             if name == color:
                 canonical_colors = canonical_colors | set(symbols)
-    return mana.order(canonical_colors)
+    return set(mana.order(canonical_colors))
 
 def regex_pattern(pattern: str) -> str:
     return '(^| )(mono[ -]?)?{pattern}( |$)'.format(pattern=pattern)
@@ -170,16 +174,16 @@ def standardize_color_string(s: str) -> str:
     for k in COLOR_COMBINATIONS:
         find = k.lower()
         colors = colors.replace(find, ''.join(COLOR_COMBINATIONS[k]))
-    return name_from_colors(list(colors.upper()))
+    return name_from_colors(set(colors.upper()))
 
-def name_from_colors(colors: List[str]) -> str:
+def name_from_colors(colors: Set[str]) -> str:
     ordered = mana.order(colors)
     for name, symbols in COLOR_COMBINATIONS.items():
         if mana.order(symbols) == ordered:
             return name
     return 'colorless'
 
-def add_colors_if_no_deckname(name: str, colors: List[str]) -> str:
+def add_colors_if_no_deckname(name: str, colors: Set[str]) -> str:
     if not name:
         name = name_from_colors(colors).strip()
     return name
@@ -199,9 +203,8 @@ def remove_mono_if_not_first_word(name: str) -> str:
     return re.sub('(.+) mono ', '\\1 ', name)
 
 def remove_profanity(name: str) -> str:
-    profanity.load_words(['bitch', 'penis', 'anal', 'crap', 'cancer', 'supremacia ariana', 'handjob'])
-    profanity.set_censor_characters(' ')
-    name = profanity.censor(name).strip()
+    profanity.add_censor_words(['supremacia ariana'])
+    name = profanity.censor(name, ' ').strip()
     name = re.sub(' +', ' ', name) # We just replaced profanity with a space so compress spaces.
     return name
 

@@ -3,17 +3,16 @@ import subprocess
 import sys
 from typing import List
 
-from modo_bugs import (scrape_announcements, scrape_bugblog, update,
-                       verification)
+from modo_bugs import scrape_announcements, scrape_bugblog, update, verification
 from shared import configuration
 
 
 def run() -> None:
     wd = configuration.get_str('modo_bugs_dir')
     if not os.path.exists(wd):
-        subprocess.run(['git', 'clone', 'https://github.com/PennyDreadfulMTG/modo-bugs.git', wd])
+        subprocess.run(['git', 'clone', 'https://github.com/PennyDreadfulMTG/modo-bugs.git', wd], check=True)
     os.chdir(wd)
-    subprocess.run(['git', 'pull'])
+    subprocess.run(['git', 'pull'], check=True)
     args = sys.argv[2:]
     if not args:
         args.extend(['scrape', 'update', 'verify', 'commit'])
@@ -33,8 +32,12 @@ def run() -> None:
     if 'verify' in args:
         verification.main()
     if 'commit' in args:
-        subprocess.run(['git', 'add', '.'])
-        subprocess.run(['git', 'commit', '-m', 'Updated'])
+        subprocess.run(['git', 'add', '.'], check=True)
+        changestr = '\n'.join(changes)
+        try:
+            subprocess.run(['git', 'commit', '-m', f'Updated\n\n{changestr}'], check=True)
+        except subprocess.CalledProcessError:
+            return
         user = configuration.get('github_user')
         pword = configuration.get('github_password')
-        subprocess.run(['git', 'push', f'https://{user}:{pword}@github.com/PennyDreadfulMTG/modo-bugs.git'])
+        subprocess.run(['git', 'push', f'https://{user}:{pword}@github.com/PennyDreadfulMTG/modo-bugs.git'], check=True)

@@ -1,7 +1,7 @@
 {{> banner}}
 <section>
     <h2>Decks</h2>
-    {{> decktable}}
+    {{> livedecktable}}
 </section>
 {{> stats}}
 {{#num_achievements}}
@@ -22,11 +22,9 @@
         <table>
             <thead>
                 <th>Opponent</th>
-                <th class="n" data-breakpoints="xs"># Matches</th>
+                <th class="n"># Matches</th>
                 <th class="n" data-sortInitialOrder="desc">Record</th>
-                <th class="n" data-breakpoints="xs"data-sortInitialOrder="desc">Win %</th>
-                {{! Empty column to hold the toggle when footable kicks in.}}
-                <td></td>
+                <th class="n"data-sortInitialOrder="desc">Win %</th>
             </thead>
             <tbody>
                 {{#head_to_head}}
@@ -35,8 +33,6 @@
                         <td class="n">{{num_matches}}</td>
                         <td class="n">{{> record}}</td>
                         <td class="n">{{win_percent}}</td>
-                        {{! Empty column to hold the toggle when footable kicks in.}}
-                        <td></td>
                     </tr>
                 {{/head_to_head}}
             </tbody>
@@ -54,6 +50,27 @@
         <canvas class="chart" data-type="{{type}}" data-labels="{{labels}}" data-series="{{series}}" data-options="{{options}}"></canvas>
     </section>
 {{/charts}}
+<section>
+    <h2>Archetype Tree</h2>
+    {{> archetypetree}}
+</section>
+{{> matchupgrid}}
+{{#has_unique_cards}}
+    <section class="card-lists">
+        <h2>Unique Cards Played</h2>
+        <ul>
+            {{#unique_cards}}
+                <li>{{.}}</li>
+            {{/unique_cards}}
+        </ul>
+        <h2>Cards Played First</h2>
+        <ul>
+            {{#trailblazer_cards}}
+                <li>{{.}}</li>
+            {{/trailblazer_cards}}
+        </ul>
+    </section>
+{{/has_unique_cards}}
 <section class="admin">
     <h2>Notes</h2>
     <div class="person-notes" data-person_id="{{person.id}}">

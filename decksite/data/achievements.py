@@ -1,24 +1,23 @@
 import re
-from typing import TYPE_CHECKING, Dict, List, Optional, cast
+from typing import Dict, List, Optional, cast
 
 from flask import url_for
 from flask_babel import gettext, ngettext
 
 import decksite
-from decksite.data import deck, query
+from decksite.data import deck, preaggregation, query
+from decksite.data.models.person import Person
 from decksite.database import db
 from magic import tournaments
 from magic.models import Deck
 from shared.container import Container
 from shared.decorators import retry_after_calling
-
-if TYPE_CHECKING:
-    from decksite.data import person # pylint:disable=unused-import
+from shared_web import logger
 
 LEADERBOARD_TOP_N = 5
 LEADERBOARD_LIMIT = 12
 
-def load_achievements(p: Optional['person.Person'], season_id: Optional[int], with_detail: bool = False) -> List[Container]:
+def load_achievements(p: Optional[Person], season_id: Optional[int], with_detail: bool = False) -> List[Container]:
     achievements = []
     for a in Achievement.all_achievements:
         desc = Container({'title': a.title, 'description_safe': a.description_safe})
@@ -35,7 +34,7 @@ def load_achievements(p: Optional['person.Person'], season_id: Optional[int], wi
         return achievements
     return sorted(achievements, key=lambda ad: -ad.percent)
 
-def load_query(people_by_id: Dict[int, 'person.Person'], season_id: Optional[int]) -> str:
+def load_query(people_by_id: Dict[int, Person], season_id: Optional[int]) -> str:
     # keys have been normalised earlier but could still be reserved words
     columns = ', '.join(f'SUM(`{a.key}`) as `{a.key}`' for a in Achievement.all_achievements if a.in_db)
     return """
@@ -51,12 +50,7 @@ def load_query(people_by_id: Dict[int, 'person.Person'], season_id: Optional[int
     """.format(columns=columns, ids=', '.join(str(k) for k in people_by_id.keys()), season_query=query.season_query(season_id))
 
 def preaggregate_achievements() -> None:
-    db().execute('DROP TABLE IF EXISTS _new_achievements')
-    db().execute(preaggregate_query())
-    db().execute('DROP TABLE IF EXISTS _old_achievements')
-    db().execute('CREATE TABLE IF NOT EXISTS _achievements (_ INT)') # Prevent error in RENAME TABLE below if bootstrapping.
-    db().execute('RENAME TABLE _achievements TO _old_achievements, _new_achievements TO _achievements')
-    db().execute('DROP TABLE IF EXISTS _old_achievements')
+    preaggregation.preaggregate('_achievements', preaggregate_query())
 
 def preaggregate_query() -> str:
     # mypy doesn't understand our contract that a.create_columns etc. are only None if in_db is False
@@ -145,14 +139,14 @@ class Achievement:
             # in case anyone ever makes a poor sportsmanship achievement called DROP TABLE
             cls.key = re.sub('[^A-Za-z0-9_]+', '', cls.key)
             if cls.key in [c.key for c in cls.all_achievements]:
-                print(f"Warning: Two achievements have the same normalised key {cls.key}. This won't do any permanent damage to the database but the results are almost certainly not as intended.")
+                logger.warning(f"Two achievements have the same normalised key {cls.key}. This won't do any permanent damage to the database but the results are almost certainly not as intended.")
             # pylint can't determine that we have verified cls.key to be a str
-            if cls.key[-7:] == '_detail': #pylint: disable=unsubscriptable-object
-                print(f"Warning: achievement key {cls.key} should not end with the string '_detail'.")
+            if cls.key[-7:] == '_detail': # pylint: disable=unsubscriptable-object
+                logger.warning(f"Achievement key {cls.key} should not end with the string '_detail'.")
             cls.all_achievements.append(cls())
 
     # pylint: disable=no-self-use, unused-argument
-    def display(self, p: 'person.Person') -> str:
+    def display(self, p: Person) -> str:
         return ''
 
     # Note: load_summary must be overridden if in_db=False!
@@ -180,7 +174,7 @@ class Achievement:
             return 0
 
     @retry_after_calling(preaggregate_achievements)
-    def detail(self, p: 'person.Person', season_id: Optional[int] = None) -> Optional[List[Deck]]:
+    def detail(self, p: Person, season_id: Optional[int] = None) -> Optional[List[Deck]]:
         if self.detail_sql is None:
             return None
         sql = """
@@ -259,7 +253,7 @@ class Achievement:
         return ''
 
 class CountedAchievement(Achievement):
-    def display(self, p: 'person.Person') -> str:
+    def display(self, p: Person) -> str:
         n = p.get('achievements', {}).get(self.key, 0)
         if n > 0:
             return self.localised_display(n)
@@ -279,17 +273,17 @@ class BooleanAchievement(Achievement):
     def alltime_text(_: int) -> str:
         return ''
 
-    def display(self, p: 'person.Person') -> str:
+    def display(self, p: Person) -> str:
         n = p.get('achievements', {}).get(self.key, 0)
         if n > 0:
-            if decksite.get_season_id() == 'all':
+            if decksite.get_season_id() == 0:
                 return self.alltime_text(n)
             return self.season_text
         return ''
 
     # No point showing a leaderboard for these on single-season page because no-one can have more than 1
     def leaderboard(self, season_id: Optional[int] = None) -> Optional[List[Container]]:
-        if season_id == 'all':
+        if season_id == 0:
             return super(BooleanAchievement, self).leaderboard(season_id=season_id)
         return None
 
@@ -305,14 +299,14 @@ class TournamentOrganizer(Achievement):
     def __init__(self) -> None:
         self.hosts = [host for series in tournaments.all_series_info() for host in series['hosts']]
 
-    def display(self, p: 'person.Person') -> str:
+    def display(self, p: Person) -> str:
         if p.name in self.hosts:
             return 'Tournament Run'
         return ''
 
     def load_summary(self, season_id: Optional[int] = None) -> Optional[str]:
         # We can't give per-season stats for this because they don't exist
-        clarification = ' (all-time)' if season_id != 'all' else ''
+        clarification = ' (all-time)' if season_id != 0 else ''
         return f'Earned by {len(self.hosts)} players{clarification}.'
 
     @retry_after_calling(preaggregate_achievements)

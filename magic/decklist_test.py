@@ -165,7 +165,7 @@ def test_parse5() -> None:
     s = textwrap.dedent(s)
     d = decklist.parse(s)
     assert len(d['maindeck']) == 13
-    assert len(d['sideboard']) == 1
+    assert len(d['sideboard']) == 0
 
 # Test that a 71 card deck includes the last 15 as sideboard
 def test_parse6() -> None:
@@ -417,3 +417,132 @@ def test_parse12() -> None:
     d = decklist.parse(s)
     assert sum(d['maindeck'].values()) == 85
     assert sum(d['sideboard'].values()) == 15
+
+# Test some zeroes as are sometimes given to us by mtggoldfish.
+def test_parse13() -> None:
+    s = """
+        0 Feast of Blood
+        3 Barter in Blood
+        4 Consume Spirit
+        4 Demonic Rising
+        4 Devour Flesh
+        2 Distress
+        0 Rhox Faithmender
+        2 Dread Statuary
+        4 Haunted Plate Mail
+        3 Homicidal Seclusion
+        4 Hymn to Tourach
+        2 Infest
+        4 Quicksand
+        4 Spawning Pool
+        14 Swamp
+        2 Ultimate Price
+        4 Underworld Connections
+        0 Island
+
+        Sideboard
+        1 Distress
+        2 Dystopia
+        1 Infest
+        0 Scrabbling Claws
+        4 Memoricide
+        2 Nature's Ruin
+        1 Pharika's Cure
+        4 Scrabbling Claws"""
+    s = textwrap.dedent(s)
+    d = decklist.parse(s)
+    assert sum(d['maindeck'].values()) == 60
+    assert len(d['maindeck']) == 15
+    assert len(d['sideboard']) == 7
+
+def test_parse_tappedout_commander() -> None:
+    s = """
+        1 Altered Ego
+        1 Blighted Woodland
+        1 Bloodwater Entity
+        1 Bogardan Hellkite
+        1 Bounty of the Luxa
+        1 Broken Bond
+        1 Cackling Counterpart
+        1 Chandra's Ignition
+        1 Charmbreaker Devils
+        1 Chromatic Lantern
+        1 Circuitous Route
+        1 Clone
+        1 Confiscate
+        1 Conqueror's Galleon
+        1 Cryptoplasm
+        1 Crystal Ball
+        1 Cultivator's Caravan
+        1 Curse of the Swine
+        1 Dack's Duplicate
+        1 Diluvian Primordial
+        1 Elemental Bond
+        1 Evolving Wilds
+        1 Felhide Spiritbinder
+        1 Flameshadow Conjuring
+        1 Followed Footsteps
+        9 Forest
+        1 Gateway Plaza
+        1 Gilded Lotus
+        1 Grow from the Ashes
+        1 Gruul Guildgate
+        1 Gruul Signet
+        1 Helm of the Host
+        1 Highland Lake
+        1 Identity Thief
+        1 Insidious Will
+        1 Intet, the Dreamer
+        7 Island
+        1 Izzet Guildgate
+        1 Journeyer's Kite
+        1 Kederekt Leviathan
+        1 Memorial to Genius
+        1 Memorial to Unity
+        1 Memorial to War
+        1 Mercurial Pretender
+        1 Molten Primordial
+        4 Mountain
+        1 Ondu Giant
+        1 Protean Raider
+        1 Pyramid of the Pantheon
+        1 Quasiduplicate
+        1 Rampant Growth
+        1 Rattleclaw Mystic
+        1 Rishkar's Expertise
+        1 Rogue's Passage
+        1 Rugged Highlands
+        1 Rupture Spire
+        1 Saheeli's Artistry
+        1 Salvager of Secrets
+        1 Sculpting Steel
+        1 Simic Guildgate
+        1 Soul Foundry
+        1 Spelltwine
+        1 Sphinx of Uthuun
+        1 Stolen Identity
+        1 Sunbird's Invocation
+        1 Tatyova, Benthic Druid
+        1 Temur Ascendancy
+        1 Thawing Glaciers
+        1 Transguild Promenade
+        1 Treasure Cruise
+        1 Trophy Mage
+        1 Trygon Predator
+        1 Unexpected Results
+        1 Urban Evolution
+        1 Vesuvan Shapeshifter
+        1 Vivid Grove
+        1 Whispersilk Cloak
+        1 Wildest Dreams
+        1 Woodland Stream
+        1 Yavimaya Hollow
+        1 Zealous Conscripts
+        1 Zendikar Resurgent
+        1 Zndrsplt's Judgment
+    """
+    s = textwrap.dedent(s)
+    d = decklist.parse(s)
+    assert sum(d['maindeck'].values()) == 100
+    assert len(d['maindeck']) == 83
+    assert len(d['sideboard']) == 0

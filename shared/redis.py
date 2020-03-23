@@ -1,5 +1,5 @@
 import json
-from typing import Any, List, Optional, TypeVar
+from typing import Any, AnyStr, List, Optional, TypeVar
 
 import redis as redislib
 
@@ -17,7 +17,7 @@ def init() -> Optional[redislib.Redis]:
         db=configuration.get_int('redis_db'),
         )
     try:
-        instance.ping()
+        instance.ping() # type: ignore
     except redislib.exceptions.ConnectionError:
         return None
     return instance
@@ -27,7 +27,7 @@ REDIS = init()
 def enabled() -> bool:
     return REDIS is not None
 
-def _get(key: str, ex: Optional[int] = None) -> Optional[str]:
+def _get(key: str, ex: Optional[int] = None) -> Optional[bytes]:
     try:
         if REDIS is not None:
             blob = REDIS.get(key)
@@ -83,7 +83,7 @@ def get_container_list(key: str) -> Optional[List[Container]]:
             return [Container(d) for d in val]
     return None
 
-T = TypeVar('T', dict, list, str, bool, covariant=True)
+T = TypeVar('T', dict, list, str, bool, int, covariant=True)
 
 def store(key: str, val: T, **kwargs: Any) -> T:
     if REDIS is not None:
@@ -95,6 +95,34 @@ def store(key: str, val: T, **kwargs: Any) -> T:
             pass
     return val
 
-def clear(*keys: str) -> None:
+def increment(key: str, **kwargs: Any) -> Optional[int]:
     if REDIS is not None:
-        REDIS.delete(*keys)
+        try:
+            return REDIS.incr(key, **kwargs) # type: ignore
+        except redislib.exceptions.BusyLoadingError:
+            pass
+        except redislib.exceptions.ConnectionError:
+            pass
+    return None
+
+def clear(*keys_list: AnyStr) -> None:
+    if REDIS is not None:
+        if len(keys_list) == 0:
+            # redis errors on a delete with no arguments, but we don't have to
+            return
+        REDIS.delete(*keys_list) # type: ignore
+
+
+def expire(key: str, time: int) -> None:
+    if REDIS is not None:
+        try:
+            REDIS.expire(key, time)
+        except redislib.exceptions.BusyLoadingError:
+            pass
+        except redislib.exceptions.ConnectionError:
+            pass
+
+def keys(pattern: str) -> List[bytes]:
+    if REDIS is not None:
+        return REDIS.keys(pattern) # type: ignore
+    return []

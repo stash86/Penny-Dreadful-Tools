@@ -3,6 +3,7 @@ from .about_pdm import AboutPdm
 from .achievements import Achievements
 from .add_form import AddForm
 from .admin import Admin
+from .admin_retire import AdminRetire
 from .archetype import Archetype
 from .archetypes import Archetypes
 from .bugs import Bugs
@@ -16,6 +17,7 @@ from .deck_check import DeckCheck
 from .decks import Decks
 from .edit_aliases import EditAliases
 from .edit_archetypes import EditArchetypes
+from .edit_league import EditLeague
 from .edit_matches import EditMatches
 from .edit_news import EditNews
 from .edit_rules import EditRules
@@ -37,7 +39,6 @@ from .retire import Retire
 from .rotation import Rotation
 from .rotation_changes import RotationChanges
 from .rotation_checklist import RotationChecklist
-from .season import Season
 from .seasons import Seasons
 from .signup import SignUp
 from .tournament_hosting import TournamentHosting

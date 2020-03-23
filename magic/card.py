@@ -88,13 +88,13 @@ def face_properties() -> TableDescription:
     props = {}
     base = copy.deepcopy(BASE)
     base['query'] = "GROUP_CONCAT(CASE WHEN `{table}`.position = 1 THEN `{table}`.`{column}` ELSE '' END SEPARATOR '') AS `{column}`"
-    for k in ['id', 'name', 'mana_cost', 'cmc', 'power', 'toughness', 'power', 'toughness', 'loyalty', 'type_line', 'oracle_text', 'image_name', 'hand', 'life', 'starter', 'position', 'card_id']:
+    for k in ['id', 'name', 'mana_cost', 'cmc', 'power', 'toughness', 'power', 'toughness', 'loyalty', 'type_line', 'oracle_text', 'hand', 'life', 'position', 'card_id']:
         props[k] = copy.deepcopy(base)
     for k in ['id', 'position', 'card_id']:
         props[k]['scryfall'] = False
     for k in ['id', 'name', 'position', 'type_line', 'oracle_text', 'card_id']:
         props[k]['nullable'] = False
-    for k in ['id', 'card_id', 'hand', 'life', 'starter']:
+    for k in ['id', 'card_id', 'hand', 'life']:
         props[k]['type'] = INTEGER
         props[k]['query'] = 'SUM(CASE WHEN `{table}`.position = 1 THEN `{table}`.`{column}` ELSE 0 END) AS `{column}`'
     props['id']['primary_key'] = True
@@ -129,16 +129,15 @@ def set_properties() -> TableDescription:
 
 def printing_properties() -> TableDescription:
     props = {}
-    for k in ['id', 'system_id', 'rarity', 'flavor', 'artist', 'number', 'multiverseid', 'watermark', 'border', 'timeshifted', 'reserved', 'mci_number', 'card_id', 'set_id', 'rarity_id']:
+    for k in ['id', 'system_id', 'flavor', 'artist', 'number', 'watermark', 'reserved', 'card_id', 'set_id', 'rarity_id']:
         props[k] = copy.deepcopy(BASE)
-    for k in ['id', 'system_id', 'rarity', 'artist', 'card_id', 'set_id']:
+    for k in ['id', 'system_id', 'artist', 'card_id', 'set_id']:
         props[k]['nullable'] = False
     for k in ['id', 'card_id', 'set_id', 'rarity_id']:
         props[k]['type'] = INTEGER
         props[k]['scryfall'] = False
     props['id']['primary_key'] = True
     props['id']['nullable'] = False
-    props['timeshifted']['type'] = BOOLEAN
     props['reserved']['type'] = BOOLEAN
     props['card_id']['foreign_key'] = ('card', 'id')
     props['set_id']['foreign_key'] = ('set', 'id')
@@ -161,6 +160,7 @@ def card_color_properties() -> TableDescription:
         props[k] = copy.deepcopy(BASE)
         props[k]['type'] = INTEGER
         props[k]['nullable'] = False
+        props[k]['scryfall'] = False
     props['id']['primary_key'] = True
     props['card_id']['foreign_key'] = ('card', 'id')
     props['card_id']['unique_with'] = ['color_id']
@@ -186,6 +186,7 @@ def format_properties() -> TableDescription:
         props[k]['nullable'] = False
     props['id']['type'] = INTEGER
     props['id']['primary_key'] = True
+    props['name']['unique'] = True
     return props
 
 def card_legality_properties() -> TableDescription:
@@ -193,6 +194,7 @@ def card_legality_properties() -> TableDescription:
     for k in ['id', 'card_id', 'format_id', 'legality']:
         props[k] = copy.deepcopy(BASE)
         props[k]['nullable'] = False
+        props[k]['scryfall'] = False
     props['id']['type'] = INTEGER
     props['id']['primary_key'] = True
     props['card_id']['type'] = INTEGER
@@ -231,10 +233,11 @@ def card_bug_properties() -> TableDescription:
     props['bannable']['type'] = BOOLEAN
     return props
 
+# If you change this you probably need to change multiverse.name_from_card_description too.
 def name_query(column: str = 'face_name') -> str:
     return """
         CASE
-        WHEN layout = 'transform' OR layout = 'flip' OR layout = 'meld' THEN
+        WHEN layout = 'transform' OR layout = 'flip' OR layout = 'meld' OR layout = 'adventure' THEN
             GROUP_CONCAT(CASE WHEN `{table}`.position = 1 THEN {column} ELSE '' END SEPARATOR '')
         ELSE
             GROUP_CONCAT({column} SEPARATOR ' // ' )

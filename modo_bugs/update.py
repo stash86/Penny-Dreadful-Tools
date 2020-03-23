@@ -13,8 +13,7 @@ from shared import configuration
 from shared.lazy import lazy_property
 
 from . import fetcher, repo, strings
-from .strings import (BAD_AFFECTS_REGEX, BADCATS, CATEGORIES, IMAGES_REGEX,
-                      REGEX_CARDREF)
+from .strings import BAD_AFFECTS_REGEX, BADCATS, CATEGORIES, IMAGES_REGEX, REGEX_CARDREF
 
 
 @lazy_property
@@ -36,7 +35,7 @@ if sys.stdout.encoding != 'utf-8':
 def main() -> None:
     if configuration.get('github_user') is None or configuration.get('github_password') is None:
         print('Invalid Config')
-        exit(1)
+        sys.exit(1)
 
     verification_numbers()
 
@@ -193,10 +192,9 @@ def fix_user_errors(issue: Issue) -> None:
     affects = strings.get_body_field(body, 'Affects')
     if affects is None:
         cards = re.findall(REGEX_CARDREF, issue.title)
-        cards = [c for c in cards]
         body = strings.set_body_field(body, 'Affects', ''.join(['[' + c + ']' for c in cards]))
     if re.search(strings.REGEX_SEARCHREF, body):
-        def do_search(m):
+        def do_search(m) -> str: # type: ignore
             search = m.group(1)
             n, cards, warnings = fetcher.search_scryfall(search)
             if n == 0 or warnings:

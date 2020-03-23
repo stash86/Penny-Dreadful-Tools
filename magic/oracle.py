@@ -1,13 +1,14 @@
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from magic import card, fetcher, mana, multiverse, rotation
+from magic import card, mana, multiverse, rotation
 from magic.card_description import CardDescription
 from magic.database import db
 from magic.models import Card
-from shared import configuration
+from shared import configuration, fetch_tools, guarantee
+from shared.container import Container
 from shared.database import sqlescape
-from shared.pd_exception import (InvalidArgumentException,
-                                 InvalidDataException, TooFewItemsException)
+from shared.pd_exception import (InvalidArgumentException, InvalidDataException,
+                                 TooFewItemsException)
 
 # Primary public interface to the magic package. Call `oracle.init()` after setting up application context and before using any methods.
 
@@ -75,6 +76,22 @@ def get_printings(generalized_card: Card) -> List[card.Printing]:
     rs = db().select(sql, [generalized_card.id])
     return [card.Printing(r) for r in rs]
 
+def get_printing(generalized_card: Card, setcode: str) -> Optional[card.Printing]:
+    if setcode is None:
+        return None
+    sql = 'SELECT ' + (', '.join('p.' + property for property in card.printing_properties())) + ', s.code AS set_code' \
+        + ' FROM printing AS p' \
+        + ' LEFT OUTER JOIN `set` AS s ON p.set_id = s.id' \
+        + ' WHERE card_id = %s AND s.code = %s'
+    rs = db().select(sql, [generalized_card.id, setcode])
+    if rs:
+        return [card.Printing(r) for r in rs][0]
+    return None
+
+def get_set(set_id: int) -> Container:
+    rs = db().select('SELECT ' + (', '.join(property for property in card.set_properties())) + ' FROM `set` WHERE id = %s', [set_id])
+    return guarantee.exactly_one([Container(r) for r in rs])
+
 def deck_sort(c: Card) -> str:
     s = ''
     if c.is_creature():
@@ -93,7 +110,7 @@ def deck_sort(c: Card) -> str:
     return s
 
 def scryfall_import(name: str) -> bool:
-    sfcard = fetcher.internal.fetch_json('https://api.scryfall.com/cards/named?fuzzy={name}'.format(name=name))
+    sfcard = fetch_tools.fetch_json('https://api.scryfall.com/cards/named?fuzzy={name}'.format(name=name))
     if sfcard['object'] == 'error':
         raise Exception()
     try:
@@ -107,7 +124,7 @@ def scryfall_import(name: str) -> bool:
 
 def pd_rotation_changes(season_id: int) -> Tuple[Sequence[Card], Sequence[Card]]:
     # It doesn't really make sense to do this for 'all' so just show current season in that case.
-    if season_id == 'all':
+    if season_id == 0:
         season_id = rotation.current_season_num()
     try:
         from_format_id = multiverse.get_format_id_from_season_id(int(season_id) - 1)
@@ -120,6 +137,7 @@ def pd_rotation_changes(season_id: int) -> Tuple[Sequence[Card], Sequence[Card]]
     return changes_between_formats(from_format_id, to_format_id)
 
 
+# pylint: disable=arguments-out-of-order
 def changes_between_formats(f1: int, f2: int) -> Tuple[Sequence[Card], Sequence[Card]]:
     return (query_diff_formats(f2, f1), query_diff_formats(f1, f2))
 
@@ -159,7 +177,11 @@ def if_todays_prices(out: bool = True) -> List[Card]:
     return sorted(cards, key=lambda card: card['name'])
 
 def add_cards_and_update(printings: List[CardDescription]) -> None:
-    multiverse.insert_cards(printings)
-    multiverse.update_cache()
-    multiverse.reindex()
-    init(force=True) # Get the new cards into CARDS_BY_NAME in memory.
+    if not printings:
+        return
+    ids = multiverse.insert_cards(printings)
+    multiverse.add_to_cache(ids)
+    cs = [Card(r) for r in db().select(multiverse.cached_base_query('c.id IN (' + ','.join([str(id) for id in ids]) + ')'))]
+    multiverse.reindex_specific_cards(cs)
+    for c in cs:
+        CARDS_BY_NAME[c.name] = c

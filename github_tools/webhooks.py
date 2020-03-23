@@ -99,8 +99,8 @@ def build_changelog(change: File) -> List[str]:
         else:
             lines.append(f'> Warning: Unknown error.')
     for package in newversions:
-        old = packaging.version.parse(oldversions.get(package))
-        new = packaging.version.parse(newversions.get(package))
+        old = packaging.version.parse(oldversions.get(package, ''))
+        new = packaging.version.parse(newversions.get(package, ''))
         changes = changelogs.get(package)
         logged = False
         for version_string in changes.keys():
@@ -131,7 +131,6 @@ def check_pr_for_mergability(pr: PullRequest) -> str:
             if status.state != 'success' and not blocked:
                 commit.create_status(state='pending', description=f'Waiting for {status.context}', context=PDM_CHECK_CONTEXT)
                 blocked = True
-                status = f'Merge blocked by {status.context}'
 
     if blocked:
         # We should only merge master into the PR if it's gonna do something.
@@ -162,7 +161,7 @@ def check_pr_for_mergability(pr: PullRequest) -> str:
         return 'good to merge'
 
     if not whitelisted and not 'merge when ready' in labels:
-        commit.create_status(state='pending', description='Waiting for "merge when ready"', context=PDM_CHECK_CONTEXT)
+        commit.create_status(state='success', description='Waiting for "merge when ready"', context=PDM_CHECK_CONTEXT)
         return 'Waiting for label'
 
     if 'beta test' in labels:
@@ -180,15 +179,14 @@ def check_pr_for_mergability(pr: PullRequest) -> str:
 
 def update_pr(pull: PullRequest) -> None:
     repo = pull.base.repo
-    if 'update me' in [l.name for l in pull.as_issue().labels]:
-        print(f'Checking if #{pull.number} is up to date with master.')
-        master = repo.get_branch('master')
-        base, head = get_common_tree(repo, master.commit.sha, pull.head.sha)
-        if head.issuperset(base):
-            print('Up to date')
-            return
-        print(f'#{pull.number}: {pull.head.ref} is behind.')
-        repo.merge(pull.head.ref, 'master', f'Merge master into #{pull.number}')
+    print(f'Checking if #{pull.number} is up to date with master.')
+    master = repo.get_branch('master')
+    base, head = get_common_tree(repo, master.commit.sha, pull.head.sha)
+    if head.issuperset(base):
+        print('Up to date')
+        return
+    print(f'#{pull.number}: {pull.head.ref} is behind.')
+    repo.merge(pull.head.ref, 'master', f'Merge master into #{pull.number}')
 
 
 def get_parents(repo: Repository, sha: str) -> List[str]:

@@ -2,7 +2,7 @@
 /* Tooltip code originally from https://deckbox.org/help/tooltips and now much hacked around and jQuery dependency introduced. */
 
 // Initialize namespaces.
-if (typeof Deckbox == "undefined") Deckbox = {};
+if (typeof Deckbox === "undefined") Deckbox = {};
 Deckbox.ui = Deckbox.ui || {};
 
 /**
@@ -35,7 +35,7 @@ Deckbox.ui.Tooltip.prototype = {
                 image.onload = null;
                 self.el.appendChild(image);
                 self.move(posX, posY);
-            }
+            };
         }
         this.el.style.display = "";
         this.move(posX, posY);
@@ -53,7 +53,7 @@ Deckbox.ui.Tooltip.prototype = {
         // Remeber these for when (if) the register call wants to show the tooltip.
         this.posX = posX;
         this.posY = posY;
-        if (this.el.style.display == "none") return;
+        if (this.el.style.display === "none") return;
 
         var pos = Deckbox._.fitToScreen(posX, posY, this.el);
 
@@ -88,45 +88,50 @@ Deckbox._ = {
 
     preloadImg: function(link) {
         var img = document.createElement("img");
-        img.style.display = "none"
-        img.style.width = "1px"
-        img.style.height = "1px"
+        img.style.display = "none";
+        img.style.width = "1px";
+        img.style.height = "1px";
         img.src = "https://deckbox.org/mtg/" + $(link).text().replace(/^[0-9 ]*/, "") + "/tooltip";
         return img;
     },
 
     pointerX: function(event) {
         var docElement = document.documentElement,
-            body = document.body || { scrollLeft: 0 };
+            body = document.body || {
+                scrollLeft: 0
+            };
 
         return event.pageX ||
             (event.clientX +
-             (docElement.scrollLeft || body.scrollLeft) -
-             (docElement.clientLeft || 0));
+                (docElement.scrollLeft || body.scrollLeft) -
+                (docElement.clientLeft || 0));
     },
 
     pointerY: function(event) {
         var docElement = document.documentElement,
-            body = document.body || { scrollTop: 0 };
+            body = document.body || {
+                scrollTop: 0
+            };
 
-        return  event.pageY ||
+        return event.pageY ||
             (event.clientY +
-             (docElement.scrollTop || body.scrollTop) -
-             (docElement.clientTop || 0));
+                (docElement.scrollTop || body.scrollTop) -
+                (docElement.clientTop || 0));
     },
 
     scrollOffsets: function() {
         return [
             window.pageXOffset || document.documentElement.scrollLeft || document.body.scrollLeft,
-            window.pageYOffset || document.documentElement.scrollTop  || document.body.scrollTop
+            window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop
         ];
     },
 
     viewportSize: function() {
-        var ua = navigator.userAgent, rootElement;
+        var ua = navigator.userAgent,
+            rootElement;
         if (ua.indexOf("AppleWebKit/") > -1 && !document.evaluate) {
             rootElement = document;
-        } else if (Object.prototype.toString.call(window.opera) == "[object Opera]" && window.parseFloat(window.opera.version()) < 9.5) {
+        } else if (Object.prototype.toString.call(window.opera) === "[object Opera]" && window.parseFloat(window.opera.version()) < 9.5) {
             rootElement = document.body;
         } else {
             rootElement = document.documentElement;
@@ -134,7 +139,7 @@ Deckbox._ = {
 
         /* IE8 in quirks mode returns 0 for these sizes. */
         var size = [rootElement["clientWidth"], rootElement["clientHeight"]];
-        if (size[1] == 0) {
+        if (size[1] === 0) {
             return [document.body["clientWidth"], document.body["clientHeight"]];
         } else {
             return size;
@@ -142,11 +147,12 @@ Deckbox._ = {
     },
 
     fitToScreen: function(posX, posY, el) {
-        var scroll = Deckbox._.scrollOffsets(), viewport = Deckbox._.viewportSize();
+        var scroll = Deckbox._.scrollOffsets(),
+            viewport = Deckbox._.viewportSize();
 
         /* decide if wee need to switch sides for the tooltip */
         /* too big for X */
-        if ((el.offsetWidth + posX) >= (viewport[0] - 15) ) {
+        if ((el.offsetWidth + posX) >= (viewport[0] - 15)) {
             posX = posX - el.offsetWidth - 20;
         }
 
@@ -164,23 +170,25 @@ Deckbox._ = {
 
     addEvent: function(obj, type, fn) {
         if (obj.addEventListener) {
-            if (type == "mousewheel") obj.addEventListener("DOMMouseScroll", fn, false);
-            obj.addEventListener( type, fn, false );
+            if (type === "mousewheel") obj.addEventListener("DOMMouseScroll", fn, false);
+            obj.addEventListener(type, fn, false);
         } else if (obj.attachEvent) {
-            obj["e"+type+fn] = fn;
-            obj[type+fn] = function() { obj["e"+type+fn]( window.event ); };
-            obj.attachEvent( "on"+type, obj[type+fn] );
+            obj["e" + type + fn] = fn;
+            obj[type + fn] = function() {
+                obj["e" + type + fn](window.event);
+            };
+            obj.attachEvent("on" + type, obj[type + fn]);
         }
     },
 
     removeEvent: function(obj, type, fn) {
         if (obj.removeEventListener) {
-            if(type == "mousewheel") obj.removeEventListener("DOMMouseScroll", fn, false);
-            obj.removeEventListener( type, fn, false );
+            if (type === "mousewheel") obj.removeEventListener("DOMMouseScroll", fn, false);
+            obj.removeEventListener(type, fn, false);
         } else if (obj.detachEvent) {
-            obj.detachEvent( "on"+type, obj[type+fn] );
-            obj[type+fn] = null;
-            obj["e"+type+fn] = null;
+            obj.detachEvent("on" + type, obj[type + fn]);
+            obj[type + fn] = null;
+            obj["e" + type + fn] = null;
         }
     },
 
@@ -203,26 +211,29 @@ Deckbox._ = {
         if ($(el).hasClass("card")) return true;
     },
 
-    tooltip: function(which)  {
-        if (which == "image") return this._iT = this._iT || new Deckbox.ui.Tooltip("deckbox_i_tooltip", "image");
-        if (which == "text") return this._tT = this._tT || new Deckbox.ui.Tooltip("deckbox_t_tooltip", "text");
+    tooltip: function(which) {
+        if (which === "image") return this._iT = this._iT || new Deckbox.ui.Tooltip("deckbox_i_tooltip", "image");
+        if (which === "text") return this._tT = this._tT || new Deckbox.ui.Tooltip("deckbox_t_tooltip", "text");
     },
 
     target: function(event) {
         var target = event.target || event.srcElement || document;
         /* check if target is a textnode (safari) */
-        if (target.nodeType == 3) target = target.parentNode;
+        if (target.nodeType === 3) target = target.parentNode;
         return target;
     },
 
     onmouseover: function(event) {
         var el = Deckbox._.target(event);
         if (Deckbox._.needsTooltip(el)) {
-            var no = el.getAttribute("data-nott"), url, img,
-                posX = Deckbox._.pointerX(event), posY = Deckbox._.pointerY(event);
+            var no = el.getAttribute("data-nott"),
+                url,
+                posX = Deckbox._.pointerX(event),
+                posY = Deckbox._.pointerY(event);
             if (!no) {
                 el._shown = true;
-                if (url = $(el).data("tt")) {
+                url = $(el).data("tt");
+                if (url) {
                     Deckbox._.showImage(el, url, posX, posY);
                 }
             }
@@ -241,7 +252,9 @@ Deckbox._ = {
     },
 
     onmousemove: function(event) {
-        var el = Deckbox._.target(event), posX = Deckbox._.pointerX(event), posY = Deckbox._.pointerY(event);
+        var el = Deckbox._.target(event),
+            posX = Deckbox._.pointerX(event),
+            posY = Deckbox._.pointerY(event);
         if (Deckbox._.needsTooltip(el)) {
             Deckbox._.tooltip("image").move(posX, posY);
         }
@@ -255,7 +268,7 @@ Deckbox._ = {
         }
     },
 
-    click: function(event) {
+    click: function() {
         Deckbox._.tooltip("image").hide();
     },
 
@@ -271,20 +284,20 @@ Deckbox._ = {
  * Preload images and CSS for maximum responsiveness even though this does unnecessary work on touch devices.
  */
 (function() {
-    var protocol = (document.location.protocol == "https:") ? "https:" : "http:";
+    var protocol = (document.location.protocol === "https:") ? "https:" : "http:";
     Deckbox._.loadCSS(protocol + "//deckbox.org/assets/external/deckbox_tooltip.css");
     /* IE needs more shit */
-    if (!!window.attachEvent && !(Object.prototype.toString.call(window.opera) == "[object Opera]")) {
+    if (!!window.attachEvent && !(Object.prototype.toString.call(window.opera) === "[object Opera]")) {
         Deckbox._.loadCSS(protocol + "//deckbox.org/assets/external/deckbox_tooltip_ie.css");
     }
 
     /* Preload the tooltip images. */
     Deckbox._.onDocumentLoad(function() {
-        $(".card").each(function () {
+        $(".card").each(function() {
             $(this).data("tt", "https://deckbox.org/mtg/" + $(this).text().replace(/^[0-9 ]*/, "") + "/tooltip");
         });
         var allLinks = document.getElementsByTagName("a");
-        for (var i = 0; i < allLinks.length; i ++) {
+        for (var i = 0; i < allLinks.length; i++) {
             var link = allLinks[i];
             if (Deckbox._.needsTooltip(link)) {
                 document.body.appendChild(Deckbox._.preloadImg(link));

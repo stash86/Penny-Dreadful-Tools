@@ -21,5 +21,5 @@ class PersonAchievements(View):
         if len([a for a in achievements if a.legend]) == 0:
             self.no_achievements = True
 
-    def page_title(self):
-        return f'Achievement details: {self.person.name}'
+    def page_title(self) -> str:
+        return f'{self.person.name} Achievements'

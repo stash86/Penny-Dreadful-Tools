@@ -10,7 +10,7 @@ FORMATS: Set[str] = set()
 def legal_in_format(d: Container, f: str) -> bool:
     return f in legal_formats(d, set([f]))
 
-def legal_formats(d: Container, formats_to_check: Set[str] = None, errors: Dict[str, Dict[str, List[str]]] = None) -> Set[str]:
+def legal_formats(d: Container, formats_to_check: Set[str] = None, errors: Dict[str, Dict[str, Set[str]]] = None) -> Set[str]:
     init()
     if formats_to_check is None:
         formats_to_check = FORMATS
@@ -35,12 +35,14 @@ def legal_formats(d: Container, formats_to_check: Set[str] = None, errors: Dict[
     if card_count.values() and max(card_count.values()) > 4:
         affected_cards = []
         for k, v in card_count.items():
-            if v > 4:
+            max_allowed = 7 if k == 'Seven Dwarves' else 4
+            if v > max_allowed:
                 affected_cards.append(k)
-        for f in formats_to_check:
-            for card in affected_cards:
-                add_error(errors, f, 'Legality_Too_Many', card)
-            formats_to_discard.add(f)
+        if affected_cards:
+            for f in formats_to_check:
+                for card in affected_cards:
+                    add_error(errors, f, 'Legality_Too_Many', card)
+                formats_to_discard.add(f)
     elif card_count.values() and max(card_count.values()) > 1:
         add_error(errors, 'Commander', 'Legality_General', 'Deck is not Singleton.')
         formats_to_discard.add('Commander')
@@ -57,12 +59,12 @@ def legal_formats(d: Container, formats_to_check: Set[str] = None, errors: Dict[
 
     return formats_to_check - formats_to_discard
 
-def add_error(errors: Dict[str, Dict[str, List[str]]], fmt: str, error_type: str, card: str) -> None:
+def add_error(errors: Dict[str, Dict[str, Set[str]]], fmt: str, error_type: str, card: str) -> None:
     if fmt not in errors:
         errors[fmt] = dict()
     if error_type not in errors[fmt]:
-        errors[fmt][error_type] = []
-    errors[fmt][error_type].append(card)
+        errors[fmt][error_type] = set()
+    errors[fmt][error_type].add(card)
 
 def cards_legal_in_format(cardlist: List[Card], f: str) -> List[Card]:
     init()

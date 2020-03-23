@@ -42,6 +42,9 @@ def test_norns_annex() -> None:
 def test_slitherhead() -> None:
     do_test('{B/G}', ['B/G'])
 
+def test_little_girl() -> None:
+    do_test('{HW}', ['HW'])
+
 def test_everything() -> None:
     rs = database.db().select('SELECT name, mana_cost FROM face')
     for row in rs:
@@ -82,9 +85,21 @@ def test_order() -> None:
     assert mana.order(['W', 'G', 'B']) == ['B', 'G', 'W']
     assert mana.order(['G', 'R', 'B']) == ['B', 'R', 'G']
     assert mana.order(['W', 'G', 'R', 'B']) == ['B', 'R', 'G', 'W']
+    assert mana.order(['W', 'G', 'R', 'B']) == ['B', 'R', 'G', 'W']
+    assert mana.order(['C']) == ['C']
+    assert mana.order(['S']) == ['S']
 
 def test_colorless() -> None:
     assert mana.colored_symbols(['C']) == {'required': ['C'], 'also': []}
+
+def test_snow() -> None:
+    assert mana.colored_symbols(['S']) == {'required': ['S'], 'also': []}
+
+def test_cmc() -> None:
+    assert mana.cmc('{HW}') == 0.5
+    assert mana.cmc('{HG}') == 0.5
+    assert mana.cmc('{1}{U}{B}') == 3
+    assert mana.cmc('{X}{R}') == 1
 
 def do_test(s: str, expected: List[str]) -> None:
     symbols = mana.parse(s)

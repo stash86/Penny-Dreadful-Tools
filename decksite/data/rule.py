@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple
 
-from decksite.data import deck
+from decksite.data import deck, preaggregation
 from decksite.database import db
 from magic.models import Deck
 from shared.container import Container
@@ -45,9 +45,9 @@ def apply_rules_to_decks(decks: List[Deck]) -> None:
         decks_by_id[r.deck_id].rule_archetype_name = r.archetype_name
 
 def cache_all_rules() -> None:
-    db().execute('DROP TABLE IF EXISTS _new_applied_rules')
+    table = '_applied_rules'
     sql = """
-            CREATE TABLE IF NOT EXISTS _new_applied_rules (
+            CREATE TABLE IF NOT EXISTS _new{table} (
                 deck_id INT NOT NULL,
                 rule_id INT NOT NULL,
                 archetype_id INT NOT NULL,
@@ -58,12 +58,8 @@ def cache_all_rules() -> None:
                 FOREIGN KEY (archetype_id) REFERENCES archetype (id) ON UPDATE CASCADE ON DELETE CASCADE
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci AS
             {apply_rules_query}
-        """.format(apply_rules_query=apply_rules_query(deck_query=classified_decks_query()))
-    db().execute(sql)
-    db().execute('DROP TABLE IF EXISTS _old_applied_rules')
-    db().execute('CREATE TABLE IF NOT EXISTS _applied_rules (_ INT)') # Prevent error in RENAME TABLE below if bootstrapping.
-    db().execute('RENAME TABLE _applied_rules TO _old_applied_rules, _new_applied_rules TO _applied_rules')
-    db().execute('DROP TABLE IF EXISTS _old_applied_rules')
+        """.format(table=table, apply_rules_query=apply_rules_query(deck_query=classified_decks_query()))
+    preaggregation.preaggregate(table, sql)
 
 @retry_after_calling(cache_all_rules)
 def num_classified_decks() -> int:
@@ -130,6 +126,7 @@ def doubled_decks() -> List[Deck]:
     result = deck.load_decks(where=f'd.id IN ({ids_list})')
     for d in result:
         d.archetypes_from_rules = archetypes_from_rules[d.id]
+        d.archetypes_from_rules_names = ', '.join(a.archetype_name for a in archetypes_from_rules[d.id])
     return result
 
 @retry_after_calling(cache_all_rules)
@@ -144,6 +141,8 @@ def overlooked_decks() -> List[Deck]:
             ON
                 deck.id = _applied_rules.deck_id
             WHERE
+                deck.created_date < UNIX_TIMESTAMP(NOW() - INTERVAL 1 DAY) -- Very new decks won't be in _applied_rules yet, but that doesn't mean they have been overlooked just that the caching hasn't run since they were created.
+            AND
                 _applied_rules.rule_id IS NULL AND deck.archetype_id IN
                     (
                         SELECT
@@ -218,7 +217,7 @@ def update_cards(rule_id: int, inc: List[Tuple[int, str]], exc: List[Tuple[int, 
 def classified_decks_query() -> str:
     return '(NOT reviewed OR deck.archetype_id NOT IN ({ex}))'.format(ex=','.join(str(aid) for aid in excluded_archetype_ids()))
 
-def apply_rules_query(deck_query: str = '1 = 1', rule_query: str = '1 = 1') -> str:
+def apply_rules_query(deck_query: str = 'TRUE', rule_query: str = 'TRUE') -> str:
     return f"""
         WITH rule_card_count AS
         (

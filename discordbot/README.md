@@ -3,93 +3,176 @@
 Displays info about quoted cards in a discord channel
 
 
-#Usage
+# Usage
 Basic bot usage: Include [cardname] in your regular messages.
 
 The bot will search for any quoted cards, and respond with the card details.
 
-#Commands
+# Commands
+## help
 
+Shows this message
 
-`!oracle {name}` Oracle text of a card.
+## legal (l, le, leg, lega)
 
-`!art {name}` Art (only) of the most recent printing of a card.
+Announce whether the specified card is legal or not.
 
-`!barbs` Volvary's advice for when to board in Aura Barbs.
+## configure (co, con, conf, confi, config, configu, configur)
 
-`!bug` Report a bug/task for the Penny Dreadful Tools team. For Magic Online bugs see `!modobug`.
+None
 
-`!buglink` Link to the modo-bugs page for a card.
+## clearimagecache (cl, cle, clea, clear, cleari, clearim, clearima, clearimag, clearimage, clearimagec, clearimageca, clearimagecac, clearimagecach)
 
-`!downtimes` No Help Available
+Deletes all the cached images.  Use sparingly
 
+## flavor (flavour, flavou)
+
+Flavor text of a card
+
+## rotate
+
+Perform all necessary post-rotation tasks.
+
+## nextrotation (ro, rot, rotation, nextr, nextro, nextrot, nextrota, nextrotat, nextrotati, nextrotatio, rotati, rotatio)
+
+Date of the next Penny Dreadful rotation.
+
+## art (a, ar)
+
+Art (only) of the most recent printing of a card.
+
+## oracle (o, or, ora, orac, oracl)
+
+Oracle text of a card.
+
+## rulings (ru, rule, ruli, rulin, ruling)
+
+Rulings for a card.
+
+## patreon (pa, pat, patr, patre, patreo)
+
+Link to the PD Patreon.
+
+## modofail (modof, modofa, modofai)
+
+Ding!
+
+## notpenny (no, not, notp, notpe, notpen, notpenn)
+
+Don't show PD Legality in this channel
+
+## resources (res, pdm, reso, resou, resour, resourc, resource, pd)
+
+Useful pages related to `args`. Examples: 'tournaments', 'card Naturalize', 'deckcheck', 'league'.
+
+## gatherlingbug (gbug, ga, gat, gath, gathe, gather, gatherl, gatherli, gatherlin, gatherling, gatherlingb, gatherlingbu, gb, gbu)
+
+Report a Gatherling bug.
+
+## version (v, ve, ver, vers, versi, versio)
+
+Display the current version numbers
+
+## history (h, hi, his, hist, histo, histor)
+
+Show the legality history of the specified card and a link to its all time page.
+
+## bug
+
+Report a bug/task for the Penny Dreadful Tools team. For Magic Online bugs see `!modobug`.
+
+## barbs (ba, bar, barb)
+
+Volvary's advice for when to board in Aura Barbs.
+
+## buglink (bl, bugl, bugli, buglin)
+
+Link to the modo-bugs page for a card.
+
+## restartbot (restart, reboot, restartb, restartbo, reb, rebo, reboo)
+
+Restart the bot.
+
+## update (u, up, upd, upda, updat)
+
+Forces an update to legal cards and bugs.
+
+## rhinos (rh, rhi, rhin, rhino)
+
+Anything can be a rhino if you try hard enough
+
+## search (s, scry, scryfall, se, sea, sear, searc, scryf, scryfa, scryfal)
+
+Card search using Scryfall.
+
+## modobug (modob, modobu)
+
+Report a Magic Online bug.
+
+## spoiler (sp, spoil, spoile)
+
+Request a card from an upcoming set.
+
+## time (t, ti, tim)
+
+Current time in location.
+
+## price (p, pr, pri, pric)
+
+Price information for a card.
+
+## explain (ex, exp, expl, expla, explai)
+
+Answers for Frequently Asked Questions
 `!explain`. Get a list of things the bot knows how to explain.
-
 `!explain {thing}`. Print commonly needed explanation for 'thing'.
 
-`!google {args}` Google for `args`.
+## quality (q, qu, qua, qual, quali, qualit)
 
-`!help` Bot commands help.
+A reminder about everyone's favorite way to play digital Magic
 
-`!history` Show the legality history of the specified card and a link to its all time page.
+## google (g, go, goo, goog, googl)
 
-`!invite` Invite me to your server.
+Google search
 
-`!legal` Announce whether the specified card is legal or not.
+## randomdeck (rd, randomd, randomde, randomdec)
 
-`!modobug` Report a Magic Online bug.
+A random deck from the current season.
 
-`!modofail` Ding!
+## whois (who, whoi)
 
-`!price {name}` Price information for a card.
+Who is a person?
 
-`!quality` A reminder about everyone's favorite way to play digital Magic
+## randomcard (r, rand, random, randomc, randomca, randomcar)
 
-`!random` A random PD legal card.
-
+A random PD legal card.
 `!random X` X random PD legal cards.
 
-`!randomdeck` A random deck from the current season.
+## downtimes (nextdowntime, d, do, dow, down, downt, downti, downtim, downtime, nextd, nextdo, nextdow, nextdown, nextdownt, nextdownti, nextdowntim)
 
-`!resources {args}` Useful pages related to `args`. Examples: 'tournaments', 'card Naturalize', 'deckcheck', 'league'.
+None
 
-`!rhinos` Anything can be a rhino if you try hard enough
+## status (mtgostatus, modostatus, st, sta, stat, statu, mt, mtg, mtgo, mtgos, mtgost, mtgosta, mtgostat, mtgostatu, modos, modost, modosta, modostat, modostatu)
 
-`!rotation` Date of the next Penny Dreadful rotation.
+Status of Magic Online.
 
-`!rulings {name}`Rulings for a card.
+## echo (ec, ech)
 
-`!search {query}` Card search using Scryfall.
+Repeat after me…
 
-`!spoiler {cardname}`: Request a card from an upcoming set.
+## invite (i, in, inv, invi, invit)
 
-`!status` Status of Magic Online.
+Invite me to your server.
 
-`!time {location}` Current time in location.
+## tournament (to, tournaments)
 
-`!tournament` Information about the next tournament.
+Information about the next tournament.
 
-`!whois` Who is a person?
+## p1p1 (p1, p1p)
 
-# Aliases
+`!p1p1` Summon a pack 1, pick 1 game.
 
-`!pdm` Alias for `!resources`.
 
-`!scryfall {query}` Alias for `!search`.
 
-# Developer Commands
-
-`!clearimagecache` Deletes all the cached images.  Use sparingly
-
-`!echo` Repeat after me…
-
-`!gbug` Report a Gatherling bug.
-
-`!restartbot` Restart the bot.
-
-`!update` Forces an update to legal cards and bugs.
-
-`!version` Display the current version numbers
-
-#Installation
+# Installation
 To add this bot to your servers use this <a href='https://discordapp.com/oauth2/authorize?client_id=224755717767299072&scope=bot&permissions=0'>link</a>

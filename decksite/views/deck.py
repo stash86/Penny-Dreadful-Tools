@@ -1,13 +1,14 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import inflect
 import titlecase
 from flask import session, url_for
 
+from decksite import prepare
 from decksite.data import archetype, deck, match
 from decksite.view import View
-from magic import card, fetcher, oracle
-from shared import dtutil
+from magic import card, oracle
+from shared import dtutil, fetch_tools
 from shared.container import Container
 from shared.pd_exception import InvalidDataException
 
@@ -17,20 +18,13 @@ class Deck(View):
     def __init__(self, d: deck.Deck, person_id: Optional[int] = None, discord_id: Optional[int] = None) -> None:
         super().__init__()
         self.deck = d
-        self.prepare_deck(self.deck)
+        prepare.prepare_deck(self.deck)
         self.cards = d.all_cards()
-        if not self.deck.is_in_current_run():
-            deck.load_similar_decks([d])
-            # This is called 'decks' and not something more sane because of limitations of Mustache and our desire to use a partial for decktable.
-            self.decks = [sd for sd in d.similar_decks if not sd.is_in_current_run()]
-        else:
-            self.decks = []
-        self.has_similar = len(self.decks) > 0
         self.matches = match.load_matches_by_deck(d, should_load_decks=True)
         for m in self.matches:
             m.display_date = dtutil.display_date(m.date)
             if m.opponent:
-                m.opponent_url = url_for('person', person_id=m.opponent)
+                m.opponent_url = url_for('.person', person_id=m.opponent)
             else:
                 m.opponent = 'BYE'
                 m.opponent_url = False
@@ -91,7 +85,7 @@ class Deck(View):
     def page_title(self) -> str:
         return self.deck.name if self.public() else '(Active League Run)'
 
-    def sections(self):
+    def sections(self) -> List[Dict[str, Any]]:
         sections = []
         if self.creatures():
             sections.append({'name': 'Creatures', 'entries': self.creatures(), 'num_entries': sum([c['n'] for c in self.creatures()])})
@@ -103,16 +97,16 @@ class Deck(View):
             sections.append({'name': 'Sideboard', 'entries': self.sideboard(), 'num_entries': sum([c['n'] for c in self.sideboard()])})
         return sections
 
-    def creatures(self):
+    def creatures(self) -> List[Dict[str, Any]]:
         return [entry for entry in self.deck.maindeck if entry.card.is_creature()]
 
-    def spells(self):
+    def spells(self) -> List[Dict[str, Any]]:
         return [entry for entry in self.deck.maindeck if entry.card.is_spell()]
 
-    def lands(self):
+    def lands(self) -> List[Dict[str, Any]]:
         return [entry for entry in self.deck.maindeck if entry.card.is_land()]
 
-    def sideboard(self):
+    def sideboard(self) -> List[Dict[str, Any]]:
         return self.deck.sideboard
 
     def public(self) -> bool:
@@ -135,7 +129,7 @@ class Deck(View):
             name = entry.name
             cs[name] = cs.get(name, 0) + entry['n']
         deck_s = '||'.join([str(v) + ' ' + card.to_mtgo_format(k).replace('"', '') for k, v in cs.items()])
-        return 'https://www.cardhoarder.com/decks/upload?deck={deck}'.format(deck=fetcher.internal.escape(deck_s))
+        return 'https://www.cardhoarder.com/decks/upload?deck={deck}'.format(deck=fetch_tools.escape(deck_s))
 
 def display_round(m: Container) -> str:
     if not m.get('elimination'):

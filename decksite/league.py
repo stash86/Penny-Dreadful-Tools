@@ -2,7 +2,8 @@ import calendar
 import datetime
 import json
 import time
-from typing import Any, Dict, List, Optional
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from flask import url_for
 from werkzeug.datastructures import ImmutableMultiDict
@@ -10,14 +11,19 @@ from werkzeug.datastructures import ImmutableMultiDict
 from decksite.data import competition, deck, match, person, query
 from decksite.data.form import Form
 from decksite.database import db
-from magic import card, decklist, fetcher, legality, rotation
+from magic import card, decklist, legality, rotation
+from magic.decklist import DecklistType
 from magic.models import Deck
-from shared import configuration, dtutil, guarantee, redis
+from shared import configuration, dtutil, fetch_tools, guarantee, redis
 from shared.container import Container
 from shared.database import sqlescape
 from shared.pd_exception import InvalidDataException, LockNotAcquiredException
 from shared_web import logger
 
+
+class Status(Enum):
+    CLOSED = 0
+    OPEN = 1
 
 # pylint: disable=attribute-defined-outside-init,too-many-instance-attributes
 class SignUpForm(Form):
@@ -38,11 +44,11 @@ class SignUpForm(Form):
                 self.recent_decks.append({'name':d['name'], 'list':json.dumps(recent_deck)})
         if mtgo_username is not None:
             self.mtgo_username = mtgo_username
-        self.deck = None
-        self.card_errors: Dict[str, List[str]] = {}
-        self.card_warnings: Dict[str, List[str]] = {}
+        self.deck = Container()
+        self.card_errors: Dict[str, Set[str]] = {}
+        self.card_warnings: Dict[str, Set[str]] = {}
 
-    def do_validation(self):
+    def do_validation(self) -> None:
         if len(self.mtgo_username) == 0:
             self.errors['mtgo_username'] = 'Magic Online Username is required'
         elif len(self.mtgo_username) > card.MAX_LEN_VARCHAR:
@@ -62,53 +68,53 @@ class SignUpForm(Form):
             self.url = url_for('competition', competition_id=self.competition_id, _external=True)
         self.parse_and_validate_decklist()
 
-    def parse_and_validate_decklist(self):
-        self.decklist = self.decklist.strip()
+    def parse_and_validate_decklist(self) -> None:
+        self.decklist: str = self.decklist.strip()
         if len(self.decklist) == 0:
             self.errors['decklist'] = 'Decklist is required'
         else:
             self.parse_decklist()
             if self.cards is not None:
                 self.vivify_deck()
-            if self.deck is not None:
+            if self.deck:
                 self.check_deck_legality()
 
-    def parse_decklist(self):
-        self.cards = None
+    def parse_decklist(self) -> None:
+        self.cards: DecklistType = {}
         if self.decklist.startswith('<?xml'):
             try:
                 self.cards = decklist.parse_xml(self.decklist)
             except InvalidDataException as e:
-                self.errors['decklist'] = 'Unable to read .dek decklist. Try exporting from Magic Online as Text and pasting the result.'.format(specific=str(e))
+                self.errors['decklist'] = 'Unable to read .dek decklist. Try exporting from Magic Online as Text and pasting the result.'
         else:
             try:
                 self.cards = decklist.parse(self.decklist)
             except InvalidDataException as e:
                 self.errors['decklist'] = '{specific}. Try exporting from Magic Online as Text and pasting the result.'.format(specific=str(e))
 
-    def vivify_deck(self):
+    def vivify_deck(self) -> None:
         try:
             self.deck = decklist.vivify(self.cards)
         except InvalidDataException as e:
             self.errors['decklist'] = str(e)
 
-    def check_deck_legality(self):
-        errors: Dict[str, Dict[str, List[str]]] = {}
+    def check_deck_legality(self) -> None:
+        errors: Dict[str, Dict[str, Set[str]]] = {}
         if 'Penny Dreadful' not in legality.legal_formats(self.deck, None, errors):
             self.errors['decklist'] = ' '.join(errors.get('Penny Dreadful', {}).pop('Legality_General', ['Not a legal deck']))
-            self.card_errors = errors.get('Penny Dreadful')
+            self.card_errors = errors.get('Penny Dreadful', {})
         banned_for_bugs = {c.name for c in self.deck.all_cards() if any([b.get('bannable', False) for b in c.bugs or []])}
         playable_bugs = {c.name for c in self.deck.all_cards() if c.pd_legal and any([not b.get('bannable', False) for b in c.bugs or []])}
         if len(banned_for_bugs) > 0:
             self.errors['decklist'] = 'Deck contains cards with game-breaking bugs'
-            self.card_errors['Legality_Bugs'] = [name for name in banned_for_bugs]
+            self.card_errors['Legality_Bugs'] = banned_for_bugs
         if len(playable_bugs) > 0:
             self.warnings['decklist'] = 'Deck contains playable bugs'
-            self.card_warnings['Warnings_Bugs'] = [name for name in playable_bugs]
+            self.card_warnings['Warnings_Bugs'] = playable_bugs
 
 
 class DeckCheckForm(SignUpForm):
-    def do_validation(self):
+    def do_validation(self) -> None:
         self.parse_and_validate_decklist()
         if len(self.errors) == 0:
             self.validation_ok_message = 'The deck is legal'
@@ -127,7 +133,7 @@ class ReportForm(Form):
             entry_decks = decks
 
         self.entry_options = deck_options(entry_decks, self.get('entry', deck_id), person_id)
-        self.opponent_options = deck_options(decks, self.get('opponent', None), person_id)
+        self.opponent_options = deck_options([d for d in decks if d.person_id != person_id], self.get('opponent', None), person_id)
         self.result_options = [
             {'text': 'Win 2–0', 'value': '2–0', 'selected': self.get('result', None) == '2–0'},
             {'text': 'Win 2–1', 'value': '2–1', 'selected': self.get('result', None) == '2–1'},
@@ -135,7 +141,7 @@ class ReportForm(Form):
             {'text': 'Lose 0–2', 'value': '0–2', 'selected': self.get('result', None) == '0–2'},
         ]
 
-    def do_validation(self):
+    def do_validation(self) -> None:
         self.id = self.entry
         if len(self.entry) == 0:
             self.errors['entry'] = 'Please select your deck'
@@ -166,7 +172,7 @@ class RetireForm(Form):
         if len(self.decks) == 0:
             self.errors['entry'] = "You don't have any decks to retire"
 
-    def do_validation(self):
+    def do_validation(self) -> None:
         if len(self.decks) == 0:
             self.errors['entry'] = "You don't have any decks to retire"
         elif len(self.entry) == 0:
@@ -188,7 +194,7 @@ def deck_options(decks: List[deck.Deck], v: str, viewer_id: Optional[int]) -> Li
         v = str(decks[0].id)
     return [{'text': d.name if d.person_id == viewer_id else d.person, 'value': d.id, 'selected': v == str(d.id), 'can_draw': d.can_draw} for d in decks]
 
-def active_decks(additional_where: str = '1 = 1') -> List[deck.Deck]:
+def active_decks(additional_where: str = 'TRUE') -> List[deck.Deck]:
     where = """
         d.id IN (
             SELECT
@@ -269,7 +275,7 @@ def report(form: ReportForm) -> bool:
         match.insert_match(dtutil.now(), form.entry, form.entry_games, form.opponent, form.opponent_games, None, None, mtgo_match_id)
         if not pdbot:
             if configuration.get('league_webhook_id') and configuration.get('league_webhook_token'):
-                fetcher.post_discord_webhook(
+                fetch_tools.post_discord_webhook(
                     configuration.get_str('league_webhook_id'),
                     configuration.get_str('league_webhook_token'),
                     '{entry} reported {f.entry_games}-{f.opponent_games} vs {opponent}'.format(f=form, entry=entry_deck.person, opponent=opponent_deck.person)
@@ -284,7 +290,7 @@ def report(form: ReportForm) -> bool:
         db().release_lock('deck_id:{id}'.format(id=form.opponent))
         db().release_lock('deck_id:{id}'.format(id=form.entry))
 
-def winner_and_loser(params):
+def winner_and_loser(params: Container) -> Tuple[Optional[int], Optional[int]]:
     if params.entry_games > params.opponent_games:
         return (params.entry, params.opponent)
     if params.opponent_games > params.entry_games:
@@ -302,9 +308,9 @@ def active_competition_id_query() -> str:
             id IN ({competition_ids_by_type_select})
         """.format(now=dtutil.dt2ts(dtutil.now()), competition_ids_by_type_select=query.competition_ids_by_type_select('League'))
 
-def active_league() -> competition.Competition:
+def active_league(should_load_decks: bool = False) -> competition.Competition:
     where = 'c.id = ({id_query})'.format(id_query=active_competition_id_query())
-    leagues = competition.load_competitions(where)
+    leagues = competition.load_competitions(where, should_load_decks=should_load_decks)
     if len(leagues) == 0:
         start_date = dtutil.now(tz=dtutil.WOTC_TZ)
         end_date = determine_end_of_league(start_date, rotation.next_rotation())
@@ -356,7 +362,7 @@ def load_latest_league_matches() -> List[Container]:
     where = 'dm.deck_id IN (SELECT id FROM deck WHERE competition_id = {competition_id})'.format(competition_id=competition_id)
     return load_matches(where)
 
-def load_matches(where: str = '1 = 1') -> List[Container]:
+def load_matches(where: str = 'TRUE') -> List[Container]:
     sql = """
         SELECT m.date, m.id, GROUP_CONCAT(dm.deck_id) AS deck_ids, GROUP_CONCAT(dm.games) AS games, mtgo_id
         FROM `match` AS m
@@ -388,13 +394,6 @@ def load_matches(where: str = '1 = 1') -> List[Container]:
             m.winner = None
             m.loser = None
     return matches
-
-def delete_match(match_id: int) -> None:
-    deck_ids = db().values('SELECT deck_id FROM deck_match WHERE match_id = %s', [match_id])
-    sql = 'DELETE FROM `match` WHERE id = %s'
-    db().execute(sql, [match_id])
-    for deck_id in deck_ids:
-        redis.clear(f'decksite:deck:{deck_id}')
 
 def first_runs() -> List[Container]:
     sql = """
@@ -438,18 +437,6 @@ def first_runs() -> List[Container]:
     """.format(league_competition_type_id=query.competition_type_id_select('League'))
     return [Container(r) for r in db().select(sql)]
 
-def update_match(match_id: int, left_id: int, left_games: int, right_id: int, right_games: int) -> None:
-    db().begin('update_match')
-    update_games(match_id, left_id, left_games)
-    update_games(match_id, right_id, right_games)
-    db().commit('update_match')
-    redis.clear(f'decksite:deck:{left_id}', f'decksite:deck:{right_id}')
-
-def update_games(match_id: int, deck_id: int, games: int) -> int:
-    sql = 'UPDATE deck_match SET games = %s WHERE match_id = %s AND deck_id = %s'
-    args = [games, match_id, deck_id]
-    return db().execute(sql, args)
-
 def random_legal_deck() -> Optional[Deck]:
     where = 'd.reviewed AND d.created_date > (SELECT start_date FROM season WHERE number = {current_season_num})'.format(current_season_num=rotation.current_season_num())
     having = '(d.competition_id NOT IN ({active_competition_id_query}) OR SUM(cache.wins + cache.draws + cache.losses) >= 5)'.format(active_competition_id_query=active_competition_id_query())
@@ -458,3 +445,13 @@ def random_legal_deck() -> Optional[Deck]:
     except IndexError:
         # For a short while at the start of a season there are no decks that match the WHERE/HAVING clauses.
         return None
+
+def get_status() -> Status:
+    sql = 'SELECT is_locked FROM competition WHERE id IN ({active_competition_id_query})'.format(active_competition_id_query=active_competition_id_query())
+    is_locked = db().value(sql)
+    return Status.CLOSED if is_locked else Status.OPEN
+
+def set_status(status: Status) -> None:
+    current = active_league()
+    sql = 'UPDATE competition SET is_locked = %s WHERE id = %s'
+    db().execute(sql, [1 if status == Status.CLOSED else 0, current.id])

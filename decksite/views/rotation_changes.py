@@ -1,11 +1,13 @@
 from typing import Any, Dict, List, Sequence
 
+from flask import url_for
+
 from decksite.view import View
 from magic import rotation
 from magic.models import Card
 
 
-# pylint: disable=no-self-use, too-many-arguments
+# pylint: disable=no-self-use, too-many-arguments, too-many-instance-attributes
 class RotationChanges(View):
     def __init__(self, cards_in: Sequence[Card], cards_out: Sequence[Card], playability: Dict[str, float], speculation: bool = False, query: str = '') -> None:
         super().__init__()
@@ -20,6 +22,10 @@ class RotationChanges(View):
         self.show_seasons = not speculation
         self.query = query
         self.show_interestingness_filter = True
+        self.show_filters_toggle = True
+        self.new_cards_deck_url = url_for('rotation_changes_files', changes_type='new')
+        self.rotated_out_cards_deck_url = url_for('rotation_changes_files', changes_type='out')
+        self.show_downloads = True
 
     def page_title(self) -> str:
         if self.speculation:

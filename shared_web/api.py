@@ -2,6 +2,7 @@ import json
 import subprocess
 from typing import Any, Dict, List, Optional, Union
 
+import humps
 from flask import Response, current_app, request
 
 from shared import configuration
@@ -21,7 +22,11 @@ def process_github_webhook() -> Response:
                     subprocess.check_output(['pip', 'install', '-U', '--user', '-r', 'requirements.txt', '--no-cache'])
                 except subprocess.CalledProcessError:
                     pass
-                import uwsgi
+                try:
+                    subprocess.check_output(['npm', 'run-script', 'build'])
+                except subprocess.CalledProcessError:
+                    pass
+                import uwsgi  # pylint: disable=import-outside-toplevel
                 uwsgi.reload()
                 return return_json({'rebooting': True})
             except ImportError:
@@ -45,7 +50,9 @@ def validate_api_key() -> Optional[Response]:
 def generate_error(code: str, msg: str, **more: Any) -> Dict[str, Any]:
     return {'error': True, 'code': code, 'msg': msg, **more}
 
-def return_json(content: Union[bool, Dict[str, Any], None, List[Container]], status: int = 200) -> Response:
+def return_json(content: Union[bool, Dict[str, Any], None, List[Container]], status: int = 200, camelize: bool = False) -> Response:
+    if camelize:
+        content = humps.camelize(content)
     s = json.dumps(content, default=extra_serializer)
     r = Response(response=s, status=status, mimetype='application/json')
     return r
